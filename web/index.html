@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Cap Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a slim control rail on top, then two working panes - player board and lineup builder. */
+:root {
+  --bg: #f3f5f2;
+  --surface: #ffffff;
+  --ink: #142019;
+  --muted: #5b6b61;
+  --line: #d9e0db;
+  --turf: #1f7a4d;
+  --turf-ink: #ffffff;
+  --turf-soft: #e3f1e9;
+  --gold: #a86f00;
+  --warn: #b5470b;
+  --warn-soft: #fbe9de;
+  --font-display: "Barlow Condensed", "Arial Narrow", sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-data: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1612; --surface: #17211b; --ink: #e6eee9; --muted: #95a69b; --line: #2a3830;
+    --turf: #3fb57a; --turf-ink: #06140c; --turf-soft: #1b3326; --gold: #e2ad3b; --warn: #f08a4b; --warn-soft: #3a2316;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1612; --surface: #17211b; --ink: #e6eee9; --muted: #95a69b; --line: #2a3830;
+  --turf: #3fb57a; --turf-ink: #06140c; --turf-soft: #1b3326; --gold: #e2ad3b; --warn: #f08a4b; --warn-soft: #3a2316;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(12px, env(safe-area-inset-top, 0px)) 40px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 18px; }
+h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+h1 { font-size: 2.1rem; font-weight: 800; line-height: 1; }
+h1 span { color: var(--turf); }
+h2 { font-size: 1.35rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+
+header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; padding-top: 6px; }
+.status { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: .86rem; color: var(--muted); }
+.status b { color: var(--ink); font-weight: 600; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+select, button, input { font: inherit; color: inherit; }
+select, input[type=number] {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; min-height: 38px;
+}
+button { cursor: pointer; border-radius: 6px; min-height: 38px; padding: 7px 14px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; }
+button:hover { border-color: var(--turf); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--turf); outline-offset: 2px; }
+button.primary { background: var(--turf); color: var(--turf-ink); border-color: var(--turf); }
+button:disabled { opacity: .5; cursor: progress; }
+
+.banner { border-radius: 8px; padding: 10px 14px; background: var(--warn-soft); color: var(--warn); font-weight: 500; }
+.panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
+@media (max-width: 920px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+.pane { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; display: grid; gap: 12px; }
+.pane-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tabs button { min-height: 32px; padding: 4px 11px; font-family: var(--font-display); font-size: 1rem; letter-spacing: .04em; }
+.tabs button[aria-pressed=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+.table-scroll { overflow-x: auto; max-height: 640px; overflow-y: auto; border-top: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th { position: sticky; top: 0; background: var(--surface); text-align: left; font-family: var(--font-display); font-weight: 600; letter-spacing: .05em; text-transform: uppercase; font-size: .8rem; color: var(--muted); padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 7px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td.r, th.r { text-align: right; }
+.pos { display: inline-block; min-width: 34px; text-align: center; font-family: var(--font-display); font-weight: 700; font-size: .8rem; letter-spacing: .05em; border-radius: 4px; padding: 1px 5px; background: var(--turf-soft); color: var(--turf); }
+.tag { display: inline-block; font-size: .72rem; font-weight: 600; border-radius: 4px; padding: 0 5px; margin-left: 6px; background: var(--warn-soft); color: var(--warn); vertical-align: 1px; }
+.player small { color: var(--muted); margin-left: 6px; }
+
+.builds { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.build { text-align: left; display: grid; gap: 2px; padding: 10px 12px; min-height: 64px; }
+.build strong { font-family: var(--font-display); font-size: 1.15rem; letter-spacing: .02em; }
+.build span { font-weight: 400; font-size: .8rem; color: var(--muted); }
+.build[aria-pressed=true] { border-color: var(--turf); background: var(--turf-soft); }
+
+details.settings { font-size: .88rem; }
+details.settings summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.settings-grid { display: flex; flex-wrap: wrap; gap: 12px 20px; padding-top: 10px; align-items: center; }
+.settings-grid label { display: flex; gap: 8px; align-items: center; }
+.settings-grid input[type=number] { width: 100px; }
+
+.results { display: grid; gap: 14px; }
+.result-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px; }
+.explain { font-size: .86rem; color: var(--muted); max-width: 70ch; margin: 0; }
+.lineup { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.lineup-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 14px; padding: 8px 12px; background: var(--turf-soft); }
+.lineup-top h3 { font-size: 1.1rem; }
+.lineup-top .figs { display: flex; gap: 14px; font-size: .88rem; }
+.lineup table td { border-bottom: 1px solid var(--line); }
+.lineup tr:last-child td { border-bottom: 0; }
+.slot { font-family: var(--font-display); font-weight: 700; color: var(--muted); width: 48px; }
+.anchor td { background: color-mix(in srgb, var(--gold) 12%, transparent); }
+.left-gold { color: var(--gold); font-weight: 600; }
+.empty { padding: 26px 12px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
+.export { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .86rem; }
+footer { font-size: .8rem; color: var(--muted); max-width: 90ch; }
+@media (prefers-reduced-motion: no-preference) { .lineup { animation: rise .25s ease-out both; } @keyframes rise { from { transform: translateY(4px); opacity: .6; } } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Cap <span>Room</span></h1>
+      <div class="status" id="status"><span>Loading this week's projections and salaries...</span></div>
+    </div>
+    <div class="controls">
+      <label for="slate" class="muted">Slate</label>
+      <select id="slate" aria-label="DraftKings slate"></select>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="panes">
+    <section class="pane" aria-labelledby="board-h">
+      <div class="pane-head">
+        <h2 id="board-h">Projections</h2>
+        <div class="tabs" id="postabs" role="group" aria-label="Filter by position">
+          <button type="button" data-pos="ALL" aria-pressed="true">ALL</button>
+          <button type="button" data-pos="QB" aria-pressed="false">QB</button>
+          <button type="button" data-pos="RB" aria-pressed="false">RB</button>
+          <button type="button" data-pos="WR" aria-pressed="false">WR</button>
+          <button type="button" data-pos="TE" aria-pressed="false">TE</button>
+          <button type="button" data-pos="DST" aria-pressed="false">DST</button>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Game</th><th class="r">DK Pts</th><th class="r">Salary</th><th class="r">Pts/$1K</th></tr></thead>
+          <tbody id="board"><tr><td colspan="7" class="muted">Loading players...</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="pane" aria-labelledby="build-h">
+      <div class="pane-head"><h2 id="build-h">Build lineups</h2></div>
+      <div class="builds" id="builds">
+        <button type="button" class="build" data-build="balanced"><strong>Top 5 Balanced</strong><span>No cheap or injury-tagged players</span></button>
+        <button type="button" class="build" data-build="projected"><strong>Top 5 Projected</strong><span>The 5 highest-scoring lineups possible</span></button>
+        <button type="button" class="build" data-build="QB"><strong>Top QB Lineup</strong><span>Built around the #1 QB</span></button>
+        <button type="button" class="build" data-build="RB"><strong>Top RB Lineup</strong><span>Built around the #1 RB</span></button>
+        <button type="button" class="build" data-build="WR"><strong>Top WR Lineup</strong><span>Built around the #1 WR</span></button>
+        <button type="button" class="build" data-build="TE"><strong>Top TE Lineup</strong><span>Built around the #1 TE</span></button>
+      </div>
+      <div class="controls"><button type="button" class="primary" id="buildall">Build all six</button></div>
+      <details class="settings">
+        <summary>Balanced lineup rules</summary>
+        <div class="settings-grid">
+          <label for="minqb">QB salary at least <input type="number" id="minqb" min="4000" max="9000" step="100" value="5000"></label>
+          <label for="minsal">RB, WR, TE salary at least <input type="number" id="minsal" min="2500" max="9000" step="100" value="4000"></label>
+          <label for="noq"><input type="checkbox" id="noq" checked> Leave out Questionable players</label>
+        </div>
+      </details>
+      <div class="results" id="results">
+        <div class="empty">Pick a lineup type above. Lineups use the DraftKings salary cap for the selected slate.</div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    Projections are Sleeper's weekly projected stats, converted to DraftKings scoring: full PPR, 4 per passing TD, -1 per interception or fumble lost, +3 at 300 passing or 100 rushing/receiving yards (scored as the chance of reaching it), and DraftKings defense scoring. Players listed Out, IR or Doubtful are never used. Salaries, slates and the salary cap come from DraftKings each time the page loads.
+  </footer>
+</div>
+
+<script>
+"use strict";
+const HIGHS_CDN = "https://cdn.jsdelivr.net/npm/highs@1.15.4/build/";
+const URLS = {
+  groups: "https://api.draftkings.com/draftgroups/v1/?sport=NFL",
+  draftables: id => `https://api.draftkings.com/draftgroups/v1/draftgroups/${id}/draftables`,
+  rules: "https://api.draftkings.com/lineups/v1/gametypes/1/rules",
+  state: "https://api.sleeper.app/v1/state/nfl",
+  proj: (season, week) => `https://api.sleeper.com/projections/nfl/${season}/${week}?season_type=regular` +
+    ["QB", "RB", "WR", "TE", "DEF"].map(p => `&position[]=${p}`).join(""),
+};
+const CLASSIC_CONTEST_TYPE = 21;
+const NEVER_USE = new Set(["OUT", "IR", "D"]);   // DraftKings: Out, Injured Reserve, Doubtful
+const FLEX = ["RB", "WR", "TE"];
+
+const $ = id => document.getElementById(id);
+const fmt$ = n => "$" + n.toLocaleString("en-US");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const state = { slates: [], slate: null, cap: 50000, players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, highs: null };
+
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${new URL(url).host} answered ${r.status}`);
+  return r.json();
+}
+
+/* ---------- DraftKings scoring from Sleeper projected stats ---------- */
+function erfc(x) {  // Abramowitz-Stegun 7.1.26
+  const z = Math.abs(x), t = 1 / (1 + 0.5 * z);
+  const r = t * Math.exp(-z * z - 1.26551223 + t * (1.00002368 + t * (0.37409196 + t * (0.09678418 + t * (-0.18628806 +
+    t * (0.27886807 + t * (-1.13520398 + t * (1.48851587 + t * (-0.82215223 + t * 0.17087277)))))))));
+  return x >= 0 ? r : 2 - r;
+}
+const pAtLeast = (mean, thr, sd) => mean <= 0 ? 0 : 0.5 * erfc((thr - mean) / sd / Math.SQRT2);
+const PTS_ALLOWED = [[0, 0, 10], [1, 6, 7], [7, 13, 4], [14, 20, 1], [21, 27, 0], [28, 34, -1], [35, 99, -4]];
+
+function dkPoints(s, pos) {
+  const g = k => +s[k] || 0;
+  if (pos === "DST") {
+    let pts = g("sack") + 2 * g("int") + 2 * g("fum_rec") + 2 * g("safe") + 2 * g("blk_kick") +
+      6 * (g("def_td") + g("def_st_td") + g("st_td") + g("def_kr_td") + g("def_pr_td"));
+    if ("pts_allow" in s) {
+      const m = g("pts_allow");
+      for (const [lo, hi, v] of PTS_ALLOWED) pts += v * (pAtLeast(m, lo - 0.5, 9) - pAtLeast(m, hi + 0.5, 9));
+    }
+    return pts;
+  }
+  const py = g("pass_yd"), ry = g("rush_yd"), rcy = g("rec_yd");
+  return 0.04 * py + 4 * g("pass_td") - g("pass_int") + 0.1 * ry + 6 * g("rush_td") +
+    g("rec") + 0.1 * rcy + 6 * g("rec_td") + 2 * (g("pass_2pt") + g("rush_2pt") + g("rec_2pt")) -
+    g("fum_lost") + 6 * (g("kr_td") + g("pr_td") + g("fum_rec_td")) +
+    3 * pAtLeast(py, 300, 65) + 3 * pAtLeast(ry, 100, Math.max(15, 0.45 * ry)) + 3 * pAtLeast(rcy, 100, Math.max(15, 0.45 * rcy));
+}
+
+/* ---------- Matching DraftKings players to Sleeper projections ---------- */
+const SUFFIX = new Set(["jr", "sr", "ii", "iii", "iv", "v"]);
+const normName = n => n.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/-/g, " ")
+  .replace(/[^a-z ]/g, "").split(/\s+/).filter(w => w && !SUFFIX.has(w)).join(" ");
+
+function indexProjections(rows) {
+  const byTeam = new Map(), byName = new Map(), defs = new Map();
+  for (const r of rows) {
+    if (!r.stats || !r.player) continue;
+    const pl = r.player, team = r.team || pl.team;
+    if (pl.position === "DEF") { defs.set(team, r); continue; }
+    const k = normName(`${pl.first_name || ""} ${pl.last_name || ""}`);
+    byTeam.set(k + "|" + team, r);
+    if (!byName.has(k)) byName.set(k, []);
+    byName.get(k).push(r);
+  }
+  return { byTeam, byName, defs };
+}
+function findProjection(idx, p) {
+  if (p.pos === "DST") return idx.defs.get(p.team);
+  const k = normName(p.name);
+  return idx.byTeam.get(k + "|" + p.team) || (idx.byName.get(k)?.length === 1 ? idx.byName.get(k)[0] : undefined);
+}
+
+/* ---------- Loading ---------- */
+function setStatus(html) { $("status").innerHTML = html; }
+function showBanner(msg) { $("banner").textContent = msg; $("banner").hidden = !msg; }
+
+async function loadSlates() {
+  const data = await getJSON(URLS.groups);
+  state.slates = data.draftGroups
+    .filter(g => g.contestType?.contestTypeId === CLASSIC_CONTEST_TYPE && g.contestType?.sport === "NFL")
+    .map(g => ({ id: g.draftGroupId, label: (g.startTimeSuffix || "").trim().replace(/^\(|\)$/g, "") || "Main slate",
+      games: (g.games || []).length, start: g.minStartTime, teams: (g.games || []).map(x => x.description) }))
+    .sort((a, b) => a.start.localeCompare(b.start) || b.games - a.games);
+  if (!state.slates.length) throw new Error("DraftKings has no NFL Classic slates open right now. New slates usually open early in the week.");
+  const firstDay = state.slates[0].start.slice(0, 10);
+  const main = state.slates.find(s => s.label === "Main slate") ||
+    state.slates.filter(s => s.start.slice(0, 10) === firstDay).sort((a, b) => b.games - a.games)[0];
+  const sel = $("slate");
+  state.slates = [main, ...state.slates.filter(s => s !== main)];
+  sel.innerHTML = state.slates.map(s => {
+    const d = new Date(s.start).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
+    return `<option value="${s.id}">${esc(s.label)} - ${s.games} games, ${d}</option>`;
+  }).join("");
+  const keep = state.slate && state.slates.find(s => s.id === state.slate.id);
+  state.slate = keep || main;
+  sel.value = state.slate.id;
+}
+
+async function projectionsFor(season, week) {
+  const key = season + "-" + week;
+  if (!state.projCache[key]) state.projCache[key] = await getJSON(URLS.proj(season, week));
+  return state.projCache[key];
+}
+
+function matchShare(rows, slate) {
+  const pairs = new Set(slate.teams.flatMap(d => { const [a, b] = d.split(/ @ | vs /); return [a + "|" + b, b + "|" + a]; }));
+  const defs = rows.filter(r => r.player?.position === "DEF");
+  if (!defs.length) return 0;
+  return defs.filter(r => pairs.has(r.team + "|" + r.opponent)).length / Math.max(1, slate.teams.length * 2);
+}
+
+async function loadSlate() {
+  const slate = state.slate;
+  const [rules, dg] = await Promise.all([getJSON(URLS.rules), getJSON(URLS.draftables(slate.id))]);
+  state.cap = rules.salaryCap.maxValue;
+  const seen = new Map();
+  for (const d of dg.draftables) {
+    if (d.isDisabled || seen.has(d.playerId)) continue;
+    seen.set(d.playerId, { id: d.draftableId, pid: d.playerId, name: d.displayName, pos: d.position, team: d.teamAbbreviation,
+      salary: d.salary, status: d.status && d.status !== "None" ? d.status : "", game: d.competition?.name || "",
+      start: d.competition?.startTime || "" });
+  }
+  await attachProjections([...seen.values()], slate.teams, "DraftKings live");
+}
+
+async function attachProjections(players, slateGames, source) {
+  const sleeperState = await getJSON(URLS.state);
+  state.season = sleeperState.season;
+  // Sleeper's "current week" can lag or lead the DraftKings slate, so pick the week whose matchups fit the slate.
+  const slate = { teams: slateGames };
+  let week = sleeperState.week || 1, rows = await projectionsFor(state.season, week);
+  if (matchShare(rows, slate) < 0.6) {
+    const nextRows = await projectionsFor(state.season, week + 1);
+    if (matchShare(nextRows, slate) > matchShare(rows, slate)) { week += 1; rows = nextRows; }
+  }
+  state.week = week;
+  const idx = indexProjections(rows);
+  for (const p of players) {
+    const pr = findProjection(idx, p);
+    p.proj = pr ? Math.round(dkPoints(pr.stats, p.pos) * 100) / 100 : 0;
+  }
+  state.players = players;
+  const loaded = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  setStatus(`<span>Week <b>${week}</b> projections</span><span>Salary cap <b class="num">${fmt$(state.cap)}</b></span>` +
+    `<span><b>${players.filter(p => p.proj > 0).length}</b> projected players</span><span>Salaries: ${esc(source)}</span><span>Updated ${loaded}</span>`);
+}
+
+/* DraftKings salary CSV (contest page > Export to CSV) - used when DraftKings blocks the live request. */
+function parseCSVLine(line) {
+  const out = []; let cur = "", q = false;
+  for (const ch of line) {
+    if (ch === '"') q = !q; else if (ch === "," && !q) { out.push(cur); cur = ""; } else cur += ch;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+async function loadSalaryFile(file) {
+  const lines = (await file.text()).split(/\r?\n/).filter(l => l.trim());
+  const head = parseCSVLine(lines[0]);
+  const col = name => head.indexOf(name);
+  const need = ["Position", "Name", "ID", "Salary", "Game Info", "TeamAbbrev"];
+  if (need.some(n => col(n) < 0)) throw new Error("that file is not a DraftKings salary export (missing " + need.filter(n => col(n) < 0).join(", ") + ")");
+  if (lines.slice(1).some(l => /CPT/.test(parseCSVLine(l)[col("Roster Position")] || ""))) throw new Error("that is a Showdown file; load a Classic salary file");
+  const games = new Set(), players = [];
+  for (const l of lines.slice(1)) {
+    const c = parseCSVLine(l);
+    const info = c[col("Game Info")] || "";            // e.g. "DET@MIA 11/08/2026 01:00PM ET"
+    const m = info.match(/^(\w+)@(\w+)\s+(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)(AM|PM)/);
+    let game = "", start = "";
+    if (m) {
+      game = `${m[1]} @ ${m[2]}`; games.add(game);
+      let h = +m[6] % 12 + (m[8] === "PM" ? 12 : 0);
+      start = `${m[5]}-${m[3].padStart(2, "0")}-${m[4].padStart(2, "0")}T${String(h).padStart(2, "0")}:${m[7]}`;
+    }
+    const id = +c[col("ID")];
+    if (!id) continue;
+    players.push({ id, pid: id, name: c[col("Name")], pos: c[col("Position")], team: c[col("TeamAbbrev")],
+      salary: +c[col("Salary")], status: "", game, start });
+  }
+  state.cap = 50000;  // Classic cap; the file does not include it
+  await attachProjections(players, [...games], "salary file " + file.name);
+}
+
+function showDKFallback(reason) {
+  const b = $("banner");
+  b.hidden = false;
+  b.innerHTML = `DraftKings did not answer (${esc(reason)}). To keep going, open any NFL Classic contest on DraftKings, choose
+    <b>Export to CSV</b> to download the salary file, then load it here: <input type="file" id="salfile" accept=".csv,text/csv">`;
+  $("salfile").addEventListener("change", async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { await loadSalaryFile(f); b.hidden = true; $("slate").innerHTML = `<option>${esc(f.name)}</option>`; renderBoard(); }
+    catch (err) { b.insertAdjacentHTML("beforeend", `<div>Could not read that file: ${esc(err.message)}.</div>`); }
+  });
+}
+
+async function loadAll() {
+  $("refresh").disabled = true;
+  showBanner("");
+  try {
+    try { await loadSlates(); await loadSlate(); }
+    catch (e) { setStatus("<span>Waiting for DraftKings salaries</span>"); showDKFallback(e.message); return; }
+    renderBoard();
+    if (state.lastBuild) await runBuild(state.lastBuild); else $("results").innerHTML = `<div class="empty">Pick a lineup type above. Lineups use the ${fmt$(state.cap)} salary cap for the selected slate.</div>`;
+  } catch (e) {
+    showBanner(`Could not load the latest projections: ${e.message}. Check your connection and press Refresh.`);
+    setStatus("<span>Data not loaded</span>");
+  } finally { $("refresh").disabled = false; }
+}
+
+/* ---------- Projections board ---------- */
+function renderBoard() {
+  const list = state.players.filter(p => p.proj > 0 && (state.pos === "ALL" || p.pos === state.pos))
+    .sort((a, b) => b.proj - a.proj);
+  $("board").innerHTML = list.map((p, i) => `<tr>
+    <td class="r num muted">${i + 1}</td>
+    <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)}</small></td>
+    <td><span class="pos">${p.pos}</span></td>
+    <td class="muted">${esc(p.game)}</td>
+    <td class="r num"><b>${p.proj.toFixed(2)}</b></td>
+    <td class="r num">${fmt$(p.salary)}</td>
+    <td class="r num muted">${(1000 * p.proj / p.salary).toFixed(2)}</td></tr>`).join("") ||
+    `<tr><td colspan="7" class="muted">No projected players at this position on this slate.</td></tr>`;
+}
+
+/* ---------- Optimizer (HiGHS integer programming) ---------- */
+// The HiGHS WebAssembly build becomes unstable after several solves in one page, so every
+// solve runs in its own short-lived Web Worker with a clean copy of the solver.
+const WORKER_URL = URL.createObjectURL(new Blob([`
+  importScripts("${HIGHS_CDN}highs.js");
+  onmessage = async e => {
+    try {
+      const highs = await Module({ locateFile: f => "${HIGHS_CDN}" + f });
+      const r = highs.solve(e.data);
+      const cols = {};
+      for (const [k, c] of Object.entries(r.Columns || {})) cols[k] = c.Primal;
+      postMessage({ status: r.Status, cols });
+    } catch (err) { postMessage({ error: String(err && err.message || err) }); }
+  };`], { type: "text/javascript" }));
+
+function solveLP(lp) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker(WORKER_URL);
+    const timer = setTimeout(() => { w.terminate(); reject(new Error("the solver took too long")); }, 60000);
+    w.onmessage = e => { clearTimeout(timer); w.terminate(); e.data.error ? reject(new Error(e.data.error)) : resolve(e.data); };
+    w.onerror = e => { clearTimeout(timer); w.terminate(); reject(new Error(e.message || "the solver could not load")); };
+    w.postMessage(lp);
+  });
+}
+
+function lpSum(terms) {  // keep LP-format lines short
+  const out = [];
+  for (let i = 0; i < terms.length; i += 8) out.push(terms.slice(i, i + 8).join(" "));
+  return out.join("\n  ");
+}
+
+async function solveOne(pool, { locks = [], previous = [], minDiff = 1 }) {
+  const v = i => "x" + i;
+  const sum = (filter, coef) => lpSum(pool.map((p, i) => filter(p) ? `+ ${coef ? coef(p) : 1} ${v(i)}` : null).filter(Boolean));
+  const lines = ["Maximize", " obj: " + lpSum(pool.map((p, i) => `+ ${p.proj.toFixed(2)} ${v(i)}`)), "Subject To"];
+  lines.push(" cap: " + sum(() => true, p => p.salary) + " <= " + state.cap);
+  lines.push(" size: " + sum(() => true) + " = 9");
+  lines.push(" qb: " + sum(p => p.pos === "QB") + " = 1");
+  lines.push(" dst: " + sum(p => p.pos === "DST") + " = 1");
+  lines.push(" rb: " + sum(p => p.pos === "RB") + " >= 2");
+  lines.push(" wr: " + sum(p => p.pos === "WR") + " >= 3");
+  lines.push(" te1: " + sum(p => p.pos === "TE") + " >= 1");
+  lines.push(" te2: " + sum(p => p.pos === "TE") + " <= 2");
+  locks.forEach((pid, k) => { const i = pool.findIndex(p => p.pid === pid); if (i >= 0) lines.push(` lock${k}: ${v(i)} = 1`); });
+  previous.forEach((lu, k) => {
+    const ids = new Set(lu.players.map(p => p.pid));
+    const t = pool.map((p, i) => ids.has(p.pid) ? `+ 1 ${v(i)}` : null).filter(Boolean);
+    if (t.length) lines.push(` diff${k}: ${lpSum(t)} <= ${9 - minDiff}`);
+  });
+  lines.push("Binary", " " + lpSum(pool.map((_, i) => v(i))), "End");
+  const res = await solveLP(lines.join("\n"));
+  if (res.status !== "Optimal") return null;
+  const chosen = pool.filter((_, i) => res.cols[v(i)] > 0.5);
+  return orderLineup(chosen);
+}
+
+function orderLineup(chosen) {
+  // Extra RB/WR/TE goes to FLEX; use the latest kickoff at that position so late swap stays open.
+  const need = { QB: 1, RB: 2, WR: 3, TE: 1, DST: 1 };
+  const byPos = {};
+  [...chosen].sort((a, b) => a.start.localeCompare(b.start)).forEach(p => (byPos[p.pos] ||= []).push(p));
+  const extra = FLEX.find(pos => (byPos[pos] || []).length > need[pos]);
+  const flex = byPos[extra].pop();
+  const slots = [];
+  for (const pos of ["QB", "RB", "WR", "TE"]) byPos[pos].forEach(p => slots.push([pos, p]));
+  slots.push(["FLEX", flex], ["DST", byPos.DST[0]]);
+  return { slots, players: slots.map(s => s[1]), salary: chosen.reduce((a, p) => a + p.salary, 0), proj: chosen.reduce((a, p) => a + p.proj, 0) };
+}
+
+const available = () => state.players.filter(p => p.proj > 0 && !NEVER_USE.has(p.status));
+const floors = () => ({ QB: +$("minqb").value || 0, other: +$("minsal").value || 0 });
+function balancedPool(anchor) {
+  const f = floors(), noQ = $("noq").checked;
+  return available().filter(p => p === anchor ||
+    ((p.pos === "DST" || p.salary >= (p.pos === "QB" ? f.QB : f.other)) && !(noQ && p.status === "Q")));
+}
+const balancedRule = () => `no QB under ${fmt$(floors().QB)}, no RB, WR or TE under ${fmt$(floors().other)}` +
+  ($("noq").checked ? ", and no Questionable players" : "");
+
+const BUILDS = {
+  balanced: {
+    title: "Top 5 Balanced",
+    explain: () => `The five highest-projected lineups with ${balancedRule()}.`,
+    run: async () => topN(balancedPool(), 5),
+  },
+  projected: {
+    title: "Top 5 Projected",
+    explain: () => "The five highest projected point totals possible under the cap, with any healthy player allowed.",
+    run: async () => topN(available(), 5),
+  },
+};
+for (const pos of ["QB", "RB", "WR", "TE"]) {
+  BUILDS[pos] = {
+    title: `Top ${pos} Lineup`,
+    anchor: () => available().filter(p => p.pos === pos).sort((a, b) => b.proj - a.proj)[0],
+    explain() { const a = this.anchor(); return a ? `Starts with ${a.name}, the top projected ${pos} (${a.proj.toFixed(2)} pts, ${fmt$(a.salary)}), then fills the highest-projected lineup around him with ${balancedRule()}.` : ""; },
+    async run() { const a = this.anchor(); if (!a) return []; const lu = await solveOne(balancedPool(a), { locks: [a.pid] }); return lu ? [lu] : []; },
+  };
+}
+
+async function topN(pool, n) {
+  const lineups = [];
+  for (let k = 0; k < n; k++) {
+    const lu = await solveOne(pool, { previous: lineups, minDiff: 1 });
+    if (!lu) break;
+    lineups.push(lu);
+  }
+  return lineups;
+}
+
+function lineupHTML(lu, label, anchorPid) {
+  const left = state.cap - lu.salary;
+  const rows = lu.slots.map(([slot, p]) => `<tr class="${p.pid === anchorPid ? "anchor" : ""}">
+    <td class="slot">${slot}</td>
+    <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)} ${p.pos !== slot ? p.pos : ""}</small></td>
+    <td class="muted">${esc(p.game)}</td>
+    <td class="r num">${fmt$(p.salary)}</td>
+    <td class="r num"><b>${p.proj.toFixed(2)}</b></td></tr>`).join("");
+  return `<article class="lineup">
+    <div class="lineup-top"><h3>${esc(label)}</h3>
+      <div class="figs num"><span><b>${lu.proj.toFixed(2)}</b> pts</span><span>${fmt$(lu.salary)}</span><span class="${left ? "left-gold" : "muted"}">${fmt$(left)} left</span></div></div>
+    <div class="table-scroll" style="max-height:none;border-top:0"><table><tbody>${rows}</tbody></table></div>
+  </article>`;
+}
+
+function uploadCSV(lineups) {
+  return "QB,RB,RB,WR,WR,WR,TE,FLEX,DST\n" + lineups.map(lu => lu.players.map(p => p.id).join(",")).join("\n") + "\n";
+}
+
+async function runBuild(keys) {
+  state.lastBuild = keys;
+  document.querySelectorAll(".build").forEach(b => b.setAttribute("aria-pressed", keys.length === 1 && b.dataset.build === keys[0]));
+  const box = $("results");
+  box.innerHTML = `<div class="empty">Building ${keys.length > 1 ? "all six lineup types" : BUILDS[keys[0]].title}...</div>`;
+  document.querySelectorAll(".build, #buildall").forEach(b => b.disabled = true);
+  try {
+    let html = "", all = [];
+    for (const key of keys) {
+      const b = BUILDS[key];
+      const lineups = await b.run();
+      const anchorPid = b.anchor ? b.anchor()?.pid : null;
+      all.push(...lineups);
+      html += `<div class="result-head"><h2>${esc(b.title)}</h2></div><p class="explain">${esc(b.explain())}</p>`;
+      html += lineups.length ? lineups.map((lu, i) => lineupHTML(lu, lineups.length > 1 ? `Lineup ${i + 1}` : b.title, anchorPid)).join("")
+        : `<div class="empty">No lineup fits these rules under the cap. Lower the lowest salary allowed in Balanced lineup rules.</div>`;
+    }
+    if (all.length) {
+      const csv = uploadCSV(all);
+      const href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      html += `<div class="export"><a href="${href}" download="dk_lineups_week${state.week}.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
+        <button type="button" id="copycsv">Copy upload file</button><span class="muted">On DraftKings: Lineups, then Upload Lineups.</span></div>`;
+      box.innerHTML = html;
+      $("copycsv").onclick = async e => {
+        try { await navigator.clipboard.writeText(csv); e.target.textContent = "Copied"; } catch { e.target.textContent = "Copy failed"; }
+      };
+    } else box.innerHTML = html;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">Could not build lineups: ${esc(e.message)}. Press Refresh and try again.</div>`;
+  } finally { document.querySelectorAll(".build, #buildall").forEach(b => b.disabled = false); }
+}
+
+/* ---------- Wiring ---------- */
+$("postabs").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  state.pos = b.dataset.pos;
+  document.querySelectorAll("#postabs button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  renderBoard();
+});
+$("builds").addEventListener("click", e => { const b = e.target.closest(".build"); if (b) runBuild([b.dataset.build]); });
+$("buildall").addEventListener("click", () => runBuild(["balanced", "projected", "QB", "RB", "WR", "TE"]));
+$("refresh").addEventListener("click", () => { state.projCache = {}; loadAll(); });
+$("slate").addEventListener("change", async e => {
+  state.slate = state.slates.find(s => s.id === +e.target.value);
+  $("refresh").disabled = true;
+  try { await loadSlate(); renderBoard(); if (state.lastBuild) await runBuild(state.lastBuild); }
+  catch (err) { showBanner(`Could not load that slate: ${err.message}.`); }
+  finally { $("refresh").disabled = false; }
+});
+["minqb", "minsal", "noq"].forEach(id => $(id).addEventListener("change", () => { if (state.lastBuild) runBuild(state.lastBuild); }));
+loadAll();
+</script>
+</body>
+</html>
