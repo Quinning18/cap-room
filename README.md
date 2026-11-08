@@ -8,8 +8,8 @@ Builds the highest-projected DraftKings NFL lineups under the salary cap, using:
 - **Salaries, slates, salary cap and roster slots** pulled live from DraftKings
 - **Every player on the slate** is considered, whoever owns them in your league
 
-## Web app (web/index.html)
-Open `web/index.html` in a browser. Each time it opens it pulls the current week's Sleeper projections,
+## Web app (docs/index.html)
+Open `docs/index.html` in a browser. Each time it opens it pulls the current week's Sleeper projections,
 DraftKings slates, salaries and salary cap, then shows projections by position and six lineup buttons:
 Top 5 Balanced, Top 5 Projected, and Top QB / RB / WR / TE lineups. Lineups are solved in the browser and
 can be downloaded as a DraftKings upload file. If DraftKings refuses the live request, the page asks for
