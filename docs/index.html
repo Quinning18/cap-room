@@ -115,6 +115,29 @@ details.settings summary { cursor: pointer; color: var(--muted); font-weight: 60
 .empty { padding: 26px 12px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
 .export { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .86rem; }
 footer { font-size: .8rem; color: var(--muted); max-width: 90ch; }
+
+.mode { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: var(--surface); gap: 3px; }
+.mode button { border: 0; min-height: 32px; padding: 4px 14px; font-family: var(--font-display); font-size: 1.02rem; letter-spacing: .04em; }
+.mode button[aria-pressed=true] { background: var(--turf); color: var(--turf-ink); }
+.lockcell { width: 1%; white-space: nowrap; }
+.lockbtn { min-height: 28px; padding: 2px 8px; font-size: .78rem; font-weight: 600; color: var(--muted); }
+.lockbtn + .lockbtn { margin-left: 4px; }
+.lockbtn[aria-pressed=true] { background: var(--gold); border-color: var(--gold); color: var(--surface); }
+tr.locked td { background: color-mix(in srgb, var(--gold) 9%, transparent); }
+.locks { display: grid; gap: 8px; border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; }
+.locks-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; font-size: .88rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--gold); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: .85rem; }
+.chip b { font-family: var(--font-display); color: var(--gold); letter-spacing: .04em; }
+.chip button { min-height: 24px; padding: 0 8px; border-radius: 999px; border: 0; font-size: .8rem; color: var(--muted); }
+.lock-warn { color: var(--warn); font-size: .85rem; }
+.build.mine { border-style: dashed; }
+td.slot.cpt { color: var(--gold); }
+@media (max-width: 560px) {
+  .c-rank, .c-val, .c-game { display: none; }
+  .lineup td.muted { display: none; }
+  .player small { display: block; margin-left: 0; }
+}
 @media (prefers-reduced-motion: no-preference) { .lineup { animation: rise .25s ease-out both; } @keyframes rise { from { transform: translateY(4px); opacity: .6; } } }
 </style>
 </head>
@@ -126,6 +149,10 @@ footer { font-size: .8rem; color: var(--muted); max-width: 90ch; }
       <div class="status" id="status"><span>Loading this week's projections and salaries...</span></div>
     </div>
     <div class="controls">
+      <div class="mode" id="mode" role="group" aria-label="Contest type">
+        <button type="button" data-mode="classic" aria-pressed="true">Classic</button>
+        <button type="button" data-mode="showdown" aria-pressed="false">Showdown</button>
+      </div>
       <label for="slate" class="muted">Slate</label>
       <select id="slate" aria-label="DraftKings slate"></select>
       <button id="refresh" type="button">Refresh</button>
@@ -144,44 +171,51 @@ footer { font-size: .8rem; color: var(--muted); max-width: 90ch; }
           <button type="button" data-pos="RB" aria-pressed="false">RB</button>
           <button type="button" data-pos="WR" aria-pressed="false">WR</button>
           <button type="button" data-pos="TE" aria-pressed="false">TE</button>
+          <button type="button" data-pos="K" aria-pressed="false" hidden>K</button>
           <button type="button" data-pos="DST" aria-pressed="false">DST</button>
         </div>
       </div>
       <div class="table-scroll">
         <table>
-          <thead><tr><th class="r">#</th><th>Player</th><th>Pos</th><th>Game</th><th class="r">DK Pts</th><th class="r">Salary</th><th class="r">Pts/$1K</th></tr></thead>
-          <tbody id="board"><tr><td colspan="7" class="muted">Loading players...</td></tr></tbody>
+          <thead><tr><th>Lock</th><th class="r c-rank">#</th><th>Player</th><th>Pos</th><th class="r">DK Pts</th><th class="r" id="salhead">Salary</th><th class="r c-val">Pts/$1K</th><th class="c-game">Game</th></tr></thead>
+          <tbody id="board"><tr><td colspan="8" class="muted">Loading players...</td></tr></tbody>
         </table>
       </div>
     </section>
 
     <section class="pane" aria-labelledby="build-h">
-      <div class="pane-head"><h2 id="build-h">Build lineups</h2></div>
+      <div class="pane-head"><h2 id="build-h">Build lineups</h2><span class="muted" id="modehint"></span></div>
+      <div class="locks" id="locks">
+        <div class="locks-head"><span id="lockcount">No locked players.</span><button type="button" id="clearlocks" hidden>Clear all</button></div>
+        <div class="chips" id="chips"></div>
+        <div class="lock-warn" id="lockwarn" hidden></div>
+      </div>
       <div class="builds" id="builds">
+        <button type="button" class="build mine" data-build="mine"><strong>Best Around My Locks</strong><span>Top 5 lineups built around the players you lock</span></button>
         <button type="button" class="build" data-build="balanced"><strong>Top 5 Balanced</strong><span>No cheap or injury-tagged players</span></button>
         <button type="button" class="build" data-build="projected"><strong>Top 5 Projected</strong><span>The 5 highest-scoring lineups possible</span></button>
-        <button type="button" class="build" data-build="QB"><strong>Top QB Lineup</strong><span>Built around the #1 QB</span></button>
-        <button type="button" class="build" data-build="RB"><strong>Top RB Lineup</strong><span>Built around the #1 RB</span></button>
-        <button type="button" class="build" data-build="WR"><strong>Top WR Lineup</strong><span>Built around the #1 WR</span></button>
-        <button type="button" class="build" data-build="TE"><strong>Top TE Lineup</strong><span>Built around the #1 TE</span></button>
+        <button type="button" class="build" data-build="QB"><strong>Top QB Lineup</strong><span data-anchor>Built around the #1 QB</span></button>
+        <button type="button" class="build" data-build="RB"><strong>Top RB Lineup</strong><span data-anchor>Built around the #1 RB</span></button>
+        <button type="button" class="build" data-build="WR"><strong>Top WR Lineup</strong><span data-anchor>Built around the #1 WR</span></button>
+        <button type="button" class="build" data-build="TE"><strong>Top TE Lineup</strong><span data-anchor>Built around the #1 TE</span></button>
       </div>
       <div class="controls"><button type="button" class="primary" id="buildall">Build all six</button></div>
       <details class="settings">
         <summary>Balanced lineup rules</summary>
         <div class="settings-grid">
-          <label for="minqb">QB salary at least <input type="number" id="minqb" min="4000" max="9000" step="100" value="5000"></label>
-          <label for="minsal">RB, WR, TE salary at least <input type="number" id="minsal" min="2500" max="9000" step="100" value="4000"></label>
+          <label for="minqb">QB salary at least <input type="number" id="minqb" min="0" max="12000" step="100" value="5000"></label>
+          <label for="minsal">RB, WR, TE salary at least <input type="number" id="minsal" min="0" max="12000" step="100" value="4000"></label>
           <label for="noq"><input type="checkbox" id="noq" checked> Leave out Questionable players</label>
         </div>
       </details>
       <div class="results" id="results">
-        <div class="empty">Pick a lineup type above. Lineups use the DraftKings salary cap for the selected slate.</div>
+        <div class="empty">Lock any players you want, then pick a lineup type above.</div>
       </div>
     </section>
   </div>
 
   <footer>
-    Projections are Sleeper's weekly projected stats, converted to DraftKings scoring: full PPR, 4 per passing TD, -1 per interception or fumble lost, +3 at 300 passing or 100 rushing/receiving yards (scored as the chance of reaching it), and DraftKings defense scoring. Players listed Out, IR or Doubtful are never used. Salaries, slates and the salary cap come from DraftKings each time the page loads.
+    Projections are Sleeper's weekly projected stats, converted to DraftKings scoring: full PPR, 4 per passing TD, -1 per interception or fumble lost, +3 at 300 passing or 100 rushing/receiving yards (scored as the chance of reaching it), DraftKings defense scoring, and for Showdown kickers 1 per extra point and 3/4/5 per field goal by distance. Showdown captains score 1.5x and cost 1.5x. Players listed Out, IR or Doubtful are only used if you lock them. Salaries, slates and the salary cap come from DraftKings each time the page loads.
   </footer>
 </div>
 
@@ -191,20 +225,30 @@ const HIGHS_CDN = "https://cdn.jsdelivr.net/npm/highs@1.15.4/build/";
 const URLS = {
   groups: "https://api.draftkings.com/draftgroups/v1/?sport=NFL",
   draftables: id => `https://api.draftkings.com/draftgroups/v1/draftgroups/${id}/draftables`,
-  rules: "https://api.draftkings.com/lineups/v1/gametypes/1/rules",
+  rules: gameType => `https://api.draftkings.com/lineups/v1/gametypes/${gameType}/rules`,
   state: "https://api.sleeper.app/v1/state/nfl",
   proj: (season, week) => `https://api.sleeper.com/projections/nfl/${season}/${week}?season_type=regular` +
-    ["QB", "RB", "WR", "TE", "DEF"].map(p => `&position[]=${p}`).join(""),
+    ["QB", "RB", "WR", "TE", "K", "DEF"].map(p => `&position[]=${p}`).join(""),
 };
-const CLASSIC_CONTEST_TYPE = 21;
+const MODES = {
+  classic: { contestType: 21, gameType: 1, name: "Classic", size: 9, header: "QB,RB,RB,WR,WR,WR,TE,FLEX,DST" },
+  showdown: { contestType: 96, gameType: 96, name: "Showdown", size: 6, header: "CPT,FLEX,FLEX,FLEX,FLEX,FLEX" },
+};
+const CPT_SLOT = 511, FLEX_SLOT = 512;   // DraftKings Showdown roster slots
 const NEVER_USE = new Set(["OUT", "IR", "D"]);   // DraftKings: Out, Injured Reserve, Doubtful
 const FLEX = ["RB", "WR", "TE"];
 
 const $ = id => document.getElementById(id);
-const fmt$ = n => "$" + n.toLocaleString("en-US");
+const fmt$ = n => "$" + Math.round(n).toLocaleString("en-US");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("caproom." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("caproom." + k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+};
 
-const state = { slates: [], slate: null, cap: 50000, players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, highs: null };
+const state = { mode: store.get("mode", "classic"), slates: [], slate: null, cap: 50000, players: [], week: null, season: null,
+  pos: "ALL", projCache: {}, lastBuild: null, locks: new Map() };
+const M = () => MODES[state.mode];
 
 async function getJSON(url) {
   const r = await fetch(url, { cache: "no-store" });
@@ -232,6 +276,9 @@ function dkPoints(s, pos) {
       for (const [lo, hi, v] of PTS_ALLOWED) pts += v * (pAtLeast(m, lo - 0.5, 9) - pAtLeast(m, hi + 0.5, 9));
     }
     return pts;
+  }
+  if (pos === "K") {
+    return g("xpm") + 3 * (g("fgm_0_19") + g("fgm_20_29") + g("fgm_30_39")) + 4 * g("fgm_40_49") + 5 * g("fgm_50p");
   }
   const py = g("pass_yd"), ry = g("rush_yd"), rcy = g("rec_yd");
   return 0.04 * py + 4 * g("pass_td") - g("pass_int") + 0.1 * ry + 6 * g("rush_td") +
@@ -270,24 +317,25 @@ function showBanner(msg) { $("banner").textContent = msg; $("banner").hidden = !
 
 async function loadSlates() {
   const data = await getJSON(URLS.groups);
-  state.slates = data.draftGroups
-    .filter(g => g.contestType?.contestTypeId === CLASSIC_CONTEST_TYPE && g.contestType?.sport === "NFL")
+  const slates = data.draftGroups
+    .filter(g => g.contestType?.contestTypeId === M().contestType && g.contestType?.sport === "NFL")
     .map(g => ({ id: g.draftGroupId, label: (g.startTimeSuffix || "").trim().replace(/^\(|\)$/g, "") || "Main slate",
       games: (g.games || []).length, start: g.minStartTime, teams: (g.games || []).map(x => x.description) }))
     .sort((a, b) => a.start.localeCompare(b.start) || b.games - a.games);
-  if (!state.slates.length) throw new Error("DraftKings has no NFL Classic slates open right now. New slates usually open early in the week.");
-  const firstDay = state.slates[0].start.slice(0, 10);
-  const main = state.slates.find(s => s.label === "Main slate") ||
-    state.slates.filter(s => s.start.slice(0, 10) === firstDay).sort((a, b) => b.games - a.games)[0];
-  const sel = $("slate");
-  state.slates = [main, ...state.slates.filter(s => s !== main)];
-  sel.innerHTML = state.slates.map(s => {
+  if (!slates.length) throw new Error(`DraftKings has no NFL ${M().name} slates open right now. New slates usually open early in the week`);
+  let first = slates[0];
+  if (state.mode === "classic") {
+    const firstDay = slates[0].start.slice(0, 10);
+    first = slates.find(s => s.label === "Main slate") || slates.filter(s => s.start.slice(0, 10) === firstDay).sort((a, b) => b.games - a.games)[0];
+  }
+  state.slates = [first, ...slates.filter(s => s !== first)];
+  $("slate").innerHTML = state.slates.map(s => {
     const d = new Date(s.start).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
-    return `<option value="${s.id}">${esc(s.label)} - ${s.games} games, ${d}</option>`;
+    return `<option value="${s.id}">${esc(s.label)} - ${state.mode === "classic" ? s.games + " games, " : ""}${d}</option>`;
   }).join("");
   const keep = state.slate && state.slates.find(s => s.id === state.slate.id);
-  state.slate = keep || main;
-  sel.value = state.slate.id;
+  state.slate = keep || first;
+  $("slate").value = state.slate.id;
 }
 
 async function projectionsFor(season, week) {
@@ -296,36 +344,41 @@ async function projectionsFor(season, week) {
   return state.projCache[key];
 }
 
-function matchShare(rows, slate) {
-  const pairs = new Set(slate.teams.flatMap(d => { const [a, b] = d.split(/ @ | vs /); return [a + "|" + b, b + "|" + a]; }));
+function matchShare(rows, games) {
+  const pairs = new Set(games.flatMap(d => { const [a, b] = d.split(/ @ | vs /); return [a + "|" + b, b + "|" + a]; }));
   const defs = rows.filter(r => r.player?.position === "DEF");
-  if (!defs.length) return 0;
-  return defs.filter(r => pairs.has(r.team + "|" + r.opponent)).length / Math.max(1, slate.teams.length * 2);
+  if (!defs.length || !games.length) return 0;
+  return defs.filter(r => pairs.has(r.team + "|" + r.opponent)).length / (games.length * 2);
 }
 
 async function loadSlate() {
   const slate = state.slate;
-  const [rules, dg] = await Promise.all([getJSON(URLS.rules), getJSON(URLS.draftables(slate.id))]);
+  const [rules, dg] = await Promise.all([getJSON(URLS.rules(M().gameType)), getJSON(URLS.draftables(slate.id))]);
   state.cap = rules.salaryCap.maxValue;
-  const seen = new Map();
+  const byPlayer = new Map();
   for (const d of dg.draftables) {
-    if (d.isDisabled || seen.has(d.playerId)) continue;
-    seen.set(d.playerId, { id: d.draftableId, pid: d.playerId, name: d.displayName, pos: d.position, team: d.teamAbbreviation,
-      salary: d.salary, status: d.status && d.status !== "None" ? d.status : "", game: d.competition?.name || "",
-      start: d.competition?.startTime || "" });
+    if (d.isDisabled) continue;
+    let p = byPlayer.get(d.playerId);
+    if (!p) {
+      p = { pid: d.playerId, name: d.displayName, pos: d.position, team: d.teamAbbreviation,
+        status: d.status && d.status !== "None" ? d.status : "", game: d.competition?.name || "", start: d.competition?.startTime || "" };
+      byPlayer.set(d.playerId, p);
+    }
+    if (state.mode === "showdown" && d.rosterSlotId === CPT_SLOT) { p.cptId = d.draftableId; p.cptSalary = d.salary; }
+    else if (p.id == null) { p.id = d.draftableId; p.salary = d.salary; }
   }
-  await attachProjections([...seen.values()], slate.teams, "DraftKings live");
+  const players = [...byPlayer.values()].filter(p => p.id != null && (state.mode === "classic" || p.cptId != null));
+  await attachProjections(players, slate.teams, "DraftKings live");
 }
 
-async function attachProjections(players, slateGames, source) {
+async function attachProjections(players, games, source) {
   const sleeperState = await getJSON(URLS.state);
   state.season = sleeperState.season;
   // Sleeper's "current week" can lag or lead the DraftKings slate, so pick the week whose matchups fit the slate.
-  const slate = { teams: slateGames };
   let week = sleeperState.week || 1, rows = await projectionsFor(state.season, week);
-  if (matchShare(rows, slate) < 0.6) {
+  if (matchShare(rows, games) < 0.6) {
     const nextRows = await projectionsFor(state.season, week + 1);
-    if (matchShare(nextRows, slate) > matchShare(rows, slate)) { week += 1; rows = nextRows; }
+    if (matchShare(nextRows, games) > matchShare(rows, games)) { week += 1; rows = nextRows; }
   }
   state.week = week;
   const idx = indexProjections(rows);
@@ -334,8 +387,9 @@ async function attachProjections(players, slateGames, source) {
     p.proj = pr ? Math.round(dkPoints(pr.stats, p.pos) * 100) / 100 : 0;
   }
   state.players = players;
+  loadLocks();
   const loaded = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  setStatus(`<span>Week <b>${week}</b> projections</span><span>Salary cap <b class="num">${fmt$(state.cap)}</b></span>` +
+  setStatus(`<span>${M().name}</span><span>Week <b>${week}</b> projections</span><span>Salary cap <b class="num">${fmt$(state.cap)}</b></span>` +
     `<span><b>${players.filter(p => p.proj > 0).length}</b> projected players</span><span>Salaries: ${esc(source)}</span><span>Updated ${loaded}</span>`);
 }
 
@@ -352,37 +406,42 @@ async function loadSalaryFile(file) {
   const lines = (await file.text()).split(/\r?\n/).filter(l => l.trim());
   const head = parseCSVLine(lines[0]);
   const col = name => head.indexOf(name);
-  const need = ["Position", "Name", "ID", "Salary", "Game Info", "TeamAbbrev"];
+  const need = ["Position", "Name", "ID", "Roster Position", "Salary", "Game Info", "TeamAbbrev"];
   if (need.some(n => col(n) < 0)) throw new Error("that file is not a DraftKings salary export (missing " + need.filter(n => col(n) < 0).join(", ") + ")");
-  if (lines.slice(1).some(l => /CPT/.test(parseCSVLine(l)[col("Roster Position")] || ""))) throw new Error("that is a Showdown file; load a Classic salary file");
-  const games = new Set(), players = [];
-  for (const l of lines.slice(1)) {
-    const c = parseCSVLine(l);
+  const rows = lines.slice(1).map(parseCSVLine);
+  const isShowdown = rows.some(c => c[col("Roster Position")] === "CPT");
+  if (isShowdown !== (state.mode === "showdown")) throw new Error(`that is a ${isShowdown ? "Showdown" : "Classic"} file; switch to ${isShowdown ? "Showdown" : "Classic"} at the top first`);
+  const games = new Set(), byKey = new Map();
+  for (const c of rows) {
     const info = c[col("Game Info")] || "";            // e.g. "DET@MIA 11/08/2026 01:00PM ET"
     const m = info.match(/^(\w+)@(\w+)\s+(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)(AM|PM)/);
     let game = "", start = "";
     if (m) {
       game = `${m[1]} @ ${m[2]}`; games.add(game);
-      let h = +m[6] % 12 + (m[8] === "PM" ? 12 : 0);
+      const h = +m[6] % 12 + (m[8] === "PM" ? 12 : 0);
       start = `${m[5]}-${m[3].padStart(2, "0")}-${m[4].padStart(2, "0")}T${String(h).padStart(2, "0")}:${m[7]}`;
     }
     const id = +c[col("ID")];
     if (!id) continue;
-    players.push({ id, pid: id, name: c[col("Name")], pos: c[col("Position")], team: c[col("TeamAbbrev")],
-      salary: +c[col("Salary")], status: "", game, start });
+    const key = c[col("Name")] + "|" + c[col("TeamAbbrev")];
+    let p = byKey.get(key);
+    if (!p) { p = { pid: key, name: c[col("Name")], pos: c[col("Position")], team: c[col("TeamAbbrev")], status: "", game, start }; byKey.set(key, p); }
+    if (c[col("Roster Position")] === "CPT") { p.cptId = id; p.cptSalary = +c[col("Salary")]; }
+    else { p.id = id; p.salary = +c[col("Salary")]; }
   }
-  state.cap = 50000;  // Classic cap; the file does not include it
-  await attachProjections(players, [...games], "salary file " + file.name);
+  state.cap = 50000;  // DraftKings NFL Classic and Showdown cap; the file does not include it
+  state.slate = { id: "file-" + file.name, teams: [...games] };
+  await attachProjections([...byKey.values()].filter(p => p.id != null), [...games], "salary file " + file.name);
 }
 
 function showDKFallback(reason) {
   const b = $("banner");
   b.hidden = false;
-  b.innerHTML = `DraftKings did not answer (${esc(reason)}). To keep going, open any NFL Classic contest on DraftKings, choose
+  b.innerHTML = `DraftKings did not answer (${esc(reason)}). To keep going, open any NFL ${M().name} contest on DraftKings, choose
     <b>Export to CSV</b> to download the salary file, then load it here: <input type="file" id="salfile" accept=".csv,text/csv">`;
   $("salfile").addEventListener("change", async e => {
     const f = e.target.files[0]; if (!f) return;
-    try { await loadSalaryFile(f); b.hidden = true; $("slate").innerHTML = `<option>${esc(f.name)}</option>`; renderBoard(); }
+    try { await loadSalaryFile(f); b.hidden = true; $("slate").innerHTML = `<option>${esc(f.name)}</option>`; renderAll(); }
     catch (err) { b.insertAdjacentHTML("beforeend", `<div>Could not read that file: ${esc(err.message)}.</div>`); }
   });
 }
@@ -390,31 +449,112 @@ function showDKFallback(reason) {
 async function loadAll() {
   $("refresh").disabled = true;
   showBanner("");
+  applyMode();
   try {
     try { await loadSlates(); await loadSlate(); }
-    catch (e) { setStatus("<span>Waiting for DraftKings salaries</span>"); showDKFallback(e.message); return; }
-    renderBoard();
-    if (state.lastBuild) await runBuild(state.lastBuild); else $("results").innerHTML = `<div class="empty">Pick a lineup type above. Lineups use the ${fmt$(state.cap)} salary cap for the selected slate.</div>`;
+    catch (e) {
+      state.players = []; renderAll();
+      setStatus(`<span>Waiting for DraftKings ${M().name} salaries</span>`); showDKFallback(e.message); return;
+    }
+    renderAll();
+    if (state.lastBuild) await runBuild(state.lastBuild);
+    else $("results").innerHTML = `<div class="empty">Lock any players you want, then pick a lineup type above. Lineups use the ${fmt$(state.cap)} salary cap.</div>`;
   } catch (e) {
     showBanner(`Could not load the latest projections: ${e.message}. Check your connection and press Refresh.`);
     setStatus("<span>Data not loaded</span>");
   } finally { $("refresh").disabled = false; }
 }
 
+function applyMode() {
+  document.querySelectorAll("#mode button").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === state.mode));
+  const sd = state.mode === "showdown";
+  document.querySelector('#postabs [data-pos="K"]').hidden = !sd;
+  if (!sd && state.pos === "K") setPos("ALL");
+  $("salhead").textContent = sd ? "FLEX / CPT" : "Salary";
+  $("modehint").textContent = sd ? "1 Captain (1.5x) + 5 FLEX" : "QB, 2 RB, 3 WR, TE, FLEX, DST";
+  document.querySelectorAll("[data-anchor]").forEach(s => {
+    const pos = s.closest(".build").dataset.build;
+    s.textContent = sd ? `The #1 ${pos} as Captain` : `Built around the #1 ${pos}`;
+  });
+}
+
+/* ---------- Locks ---------- */
+const lockKey = () => "locks." + state.mode + "." + (state.slate?.id ?? "none");
+function loadLocks() {
+  const ids = new Set(state.players.map(p => String(p.pid)));
+  state.locks = new Map(store.get(lockKey(), []).filter(([pid]) => ids.has(String(pid))));
+}
+function saveLocks() { store.set(lockKey(), [...state.locks]); }
+const playerById = pid => state.players.find(p => String(p.pid) === String(pid));
+
+function toggleLock(pid, kind) {
+  const cur = state.locks.get(pid);
+  if (cur === kind) state.locks.delete(pid);
+  else {
+    if (kind === "cpt") for (const [k, v] of state.locks) if (v === "cpt") state.locks.set(k, "any");  // one captain at a time
+    state.locks.set(pid, kind);
+  }
+  saveLocks();
+  renderBoard(); renderLocks();
+}
+
+function lockProblems() {
+  const locked = [...state.locks].map(([pid, kind]) => ({ p: playerById(pid), kind })).filter(x => x.p);
+  if (!locked.length) return "";
+  const n = locked.length, size = M().size;
+  if (n > size) return `You locked ${n} players, but a ${M().name} lineup only has ${size} spots.`;
+  if (state.mode === "showdown") {
+    const minSal = locked.reduce((a, { p, kind }) => a + (kind === "cpt" ? p.cptSalary : p.salary), 0);
+    if (minSal > state.cap) return `Your locked players cost at least ${fmt$(minSal)}, over the ${fmt$(state.cap)} cap.`;
+    return "";
+  }
+  const sal = locked.reduce((a, { p }) => a + p.salary, 0);
+  if (sal > state.cap) return `Your locked players cost ${fmt$(sal)}, over the ${fmt$(state.cap)} cap.`;
+  const count = pos => locked.filter(({ p }) => p.pos === pos).length;
+  const max = { QB: 1, DST: 1, TE: 2, RB: 3, WR: 4 };
+  for (const [pos, m] of Object.entries(max)) if (count(pos) > m) return `A Classic lineup can hold at most ${m} ${pos}${m > 1 ? "s" : ""}; you locked ${count(pos)}.`;
+  if (count("RB") + count("WR") + count("TE") > 7) return "A Classic lineup has 7 RB/WR/TE spots in total; you locked more than that.";
+  return "";
+}
+
+function renderLocks() {
+  const locked = [...state.locks].map(([pid, kind]) => ({ p: playerById(pid), kind })).filter(x => x.p);
+  $("lockcount").innerHTML = locked.length
+    ? `<b>${locked.length}</b> locked. Locked players go into every lineup you build.`
+    : "No locked players. Use Lock on the projections board to hand-pick players.";
+  $("clearlocks").hidden = !locked.length;
+  $("chips").innerHTML = locked.map(({ p, kind }) => `<span class="chip">${kind === "cpt" ? "<b>CPT</b>" : `<b>${p.pos}</b>`} ${esc(p.name)}` +
+    `${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<button type="button" data-unlock="${esc(p.pid)}" aria-label="Unlock ${esc(p.name)}">Remove</button></span>`).join("");
+  const problem = lockProblems();
+  $("lockwarn").textContent = problem;
+  $("lockwarn").hidden = !problem;
+}
+
 /* ---------- Projections board ---------- */
+function setPos(pos) {
+  state.pos = pos;
+  document.querySelectorAll("#postabs button").forEach(x => x.setAttribute("aria-pressed", x.dataset.pos === pos));
+}
 function renderBoard() {
-  const list = state.players.filter(p => p.proj > 0 && (state.pos === "ALL" || p.pos === state.pos))
+  const sd = state.mode === "showdown";
+  const list = state.players.filter(p => (p.proj > 0 || state.locks.has(p.pid)) && (state.pos === "ALL" || p.pos === state.pos))
     .sort((a, b) => b.proj - a.proj);
-  $("board").innerHTML = list.map((p, i) => `<tr>
-    <td class="r num muted">${i + 1}</td>
+  $("board").innerHTML = list.map((p, i) => {
+    const lk = state.locks.get(p.pid);
+    const pidAttr = esc(p.pid);
+    return `<tr class="${lk ? "locked" : ""}">
+    <td class="lockcell"><button type="button" class="lockbtn" data-lock="any" data-pid="${pidAttr}" aria-pressed="${lk === "any"}">${lk === "any" ? "Locked" : "Lock"}</button>${sd
+      ? `<button type="button" class="lockbtn" data-lock="cpt" data-pid="${pidAttr}" aria-pressed="${lk === "cpt"}">CPT</button>` : ""}</td>
+    <td class="r num muted c-rank">${i + 1}</td>
     <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)}</small></td>
     <td><span class="pos">${p.pos}</span></td>
-    <td class="muted">${esc(p.game)}</td>
     <td class="r num"><b>${p.proj.toFixed(2)}</b></td>
-    <td class="r num">${fmt$(p.salary)}</td>
-    <td class="r num muted">${(1000 * p.proj / p.salary).toFixed(2)}</td></tr>`).join("") ||
-    `<tr><td colspan="7" class="muted">No projected players at this position on this slate.</td></tr>`;
+    <td class="r num">${fmt$(p.salary)}${sd ? `<small class="muted"> / ${fmt$(p.cptSalary)}</small>` : ""}</td>
+    <td class="r num muted c-val">${p.salary ? (1000 * p.proj / p.salary).toFixed(2) : "-"}</td>
+    <td class="muted c-game">${esc(p.game)}</td></tr>`;
+  }).join("") || `<tr><td colspan="8" class="muted">No projected players ${state.pos === "ALL" ? "on this slate" : "at this position"}.</td></tr>`;
 }
+function renderAll() { renderBoard(); renderLocks(); }
 
 /* ---------- Optimizer (HiGHS integer programming) ---------- */
 // The HiGHS WebAssembly build becomes unstable after several solves in one page, so every
@@ -447,79 +587,125 @@ function lpSum(terms) {  // keep LP-format lines short
   return out.join("\n  ");
 }
 
-async function solveOne(pool, { locks = [], previous = [], minDiff = 1 }) {
-  const v = i => "x" + i;
-  const sum = (filter, coef) => lpSum(pool.map((p, i) => filter(p) ? `+ ${coef ? coef(p) : 1} ${v(i)}` : null).filter(Boolean));
-  const lines = ["Maximize", " obj: " + lpSum(pool.map((p, i) => `+ ${p.proj.toFixed(2)} ${v(i)}`)), "Subject To"];
-  lines.push(" cap: " + sum(() => true, p => p.salary) + " <= " + state.cap);
-  lines.push(" size: " + sum(() => true) + " = 9");
-  lines.push(" qb: " + sum(p => p.pos === "QB") + " = 1");
-  lines.push(" dst: " + sum(p => p.pos === "DST") + " = 1");
-  lines.push(" rb: " + sum(p => p.pos === "RB") + " >= 2");
-  lines.push(" wr: " + sum(p => p.pos === "WR") + " >= 3");
-  lines.push(" te1: " + sum(p => p.pos === "TE") + " >= 1");
-  lines.push(" te2: " + sum(p => p.pos === "TE") + " <= 2");
-  locks.forEach((pid, k) => { const i = pool.findIndex(p => p.pid === pid); if (i >= 0) lines.push(` lock${k}: ${v(i)} = 1`); });
-  previous.forEach((lu, k) => {
-    const ids = new Set(lu.players.map(p => p.pid));
-    const t = pool.map((p, i) => ids.has(p.pid) ? `+ 1 ${v(i)}` : null).filter(Boolean);
-    if (t.length) lines.push(` diff${k}: ${lpSum(t)} <= ${9 - minDiff}`);
+/* One decision variable per (player, slot). Classic has one slot per player; Showdown has CPT and FLEX. */
+function entriesFor(pool) {
+  if (state.mode === "classic") return pool.map(p => ({ p, slot: p.pos, salary: p.salary, proj: p.proj, id: p.id }));
+  return pool.flatMap(p => [
+    { p, slot: "CPT", salary: p.cptSalary, proj: Math.round(p.proj * 150) / 100, id: p.cptId },
+    { p, slot: "FLEX", salary: p.salary, proj: p.proj, id: p.id },
+  ]);
+}
+
+// locks: Map pid -> "any" | "cpt". previous: earlier lineups this lineup must differ from.
+async function solveOne(pool, { locks = new Map(), previous = [], minDiff = 1 } = {}) {
+  const E = entriesFor(pool), v = i => "x" + i, size = M().size;
+  const sum = (filter, coef) => lpSum(E.map((e, i) => filter(e) ? `+ ${coef ? coef(e) : 1} ${v(i)}` : null).filter(Boolean));
+  const lines = ["Maximize", " obj: " + lpSum(E.map((e, i) => `+ ${e.proj.toFixed(2)} ${v(i)}`)), "Subject To"];
+  lines.push(" cap: " + sum(() => true, e => e.salary) + " <= " + state.cap);
+  lines.push(" size: " + sum(() => true) + " = " + size);
+  if (state.mode === "classic") {
+    lines.push(" qb: " + sum(e => e.p.pos === "QB") + " = 1");
+    lines.push(" dst: " + sum(e => e.p.pos === "DST") + " = 1");
+    lines.push(" rb: " + sum(e => e.p.pos === "RB") + " >= 2");
+    lines.push(" wr: " + sum(e => e.p.pos === "WR") + " >= 3");
+    lines.push(" te1: " + sum(e => e.p.pos === "TE") + " >= 1");
+    lines.push(" te2: " + sum(e => e.p.pos === "TE") + " <= 2");
+  } else {
+    lines.push(" cpt: " + sum(e => e.slot === "CPT") + " = 1");
+    pool.forEach((p, k) => lines.push(` once${k}: ` + sum(e => e.p === p) + " <= 1"));
+    [...new Set(pool.map(p => p.team))].forEach((t, k) => lines.push(` team${k}: ` + sum(e => e.p.team === t) + " >= 1"));
+  }
+  let k = 0;
+  for (const [pid, kind] of locks) {
+    const terms = E.map((e, i) => String(e.p.pid) === String(pid) && (kind !== "cpt" || e.slot === "CPT") ? `+ 1 ${v(i)}` : null).filter(Boolean);
+    if (!terms.length) return null;   // locked player is not in this pool
+    lines.push(` lock${k++}: ${lpSum(terms)} = 1`);
+  }
+  previous.forEach((lu, j) => {
+    const keys = new Set(lu.picks.map(e => e.p.pid + "|" + e.slot));
+    const t = E.map((e, i) => keys.has(e.p.pid + "|" + e.slot) ? `+ 1 ${v(i)}` : null).filter(Boolean);
+    if (t.length) lines.push(` diff${j}: ${lpSum(t)} <= ${size - minDiff}`);
   });
-  lines.push("Binary", " " + lpSum(pool.map((_, i) => v(i))), "End");
+  lines.push("Binary", " " + lpSum(E.map((_, i) => v(i))), "End");
   const res = await solveLP(lines.join("\n"));
   if (res.status !== "Optimal") return null;
-  const chosen = pool.filter((_, i) => res.cols[v(i)] > 0.5);
-  return orderLineup(chosen);
+  return orderLineup(E.filter((_, i) => res.cols[v(i)] > 0.5));
 }
 
-function orderLineup(chosen) {
-  // Extra RB/WR/TE goes to FLEX; use the latest kickoff at that position so late swap stays open.
-  const need = { QB: 1, RB: 2, WR: 3, TE: 1, DST: 1 };
-  const byPos = {};
-  [...chosen].sort((a, b) => a.start.localeCompare(b.start)).forEach(p => (byPos[p.pos] ||= []).push(p));
-  const extra = FLEX.find(pos => (byPos[pos] || []).length > need[pos]);
-  const flex = byPos[extra].pop();
-  const slots = [];
-  for (const pos of ["QB", "RB", "WR", "TE"]) byPos[pos].forEach(p => slots.push([pos, p]));
-  slots.push(["FLEX", flex], ["DST", byPos.DST[0]]);
-  return { slots, players: slots.map(s => s[1]), salary: chosen.reduce((a, p) => a + p.salary, 0), proj: chosen.reduce((a, p) => a + p.proj, 0) };
+function orderLineup(picks) {
+  let slots;
+  if (state.mode === "showdown") {
+    slots = [...picks].sort((a, b) => (a.slot !== "CPT") - (b.slot !== "CPT") || b.salary - a.salary).map(e => [e.slot, e]);
+  } else {
+    // Extra RB/WR/TE goes to FLEX; use the latest kickoff at that position so late swap stays open.
+    const need = { QB: 1, RB: 2, WR: 3, TE: 1, DST: 1 };
+    const byPos = {};
+    [...picks].sort((a, b) => a.p.start.localeCompare(b.p.start)).forEach(e => (byPos[e.p.pos] ||= []).push(e));
+    const extra = FLEX.find(pos => (byPos[pos] || []).length > need[pos]);
+    const flex = byPos[extra].pop();
+    slots = [];
+    for (const pos of ["QB", "RB", "WR", "TE"]) byPos[pos].forEach(e => slots.push([pos, e]));
+    slots.push(["FLEX", flex], ["DST", byPos.DST[0]]);
+  }
+  return { slots, picks: slots.map(s => s[1]), salary: picks.reduce((a, e) => a + e.salary, 0), proj: picks.reduce((a, e) => a + e.proj, 0) };
 }
 
-const available = () => state.players.filter(p => p.proj > 0 && !NEVER_USE.has(p.status));
+/* ---------- Player pools and lineup types ---------- */
+const isLocked = p => state.locks.has(p.pid);
+const available = () => state.players.filter(p => isLocked(p) || (p.proj > 0 && !NEVER_USE.has(p.status)));
 const floors = () => ({ QB: +$("minqb").value || 0, other: +$("minsal").value || 0 });
 function balancedPool(anchor) {
   const f = floors(), noQ = $("noq").checked;
-  return available().filter(p => p === anchor ||
-    ((p.pos === "DST" || p.salary >= (p.pos === "QB" ? f.QB : f.other)) && !(noQ && p.status === "Q")));
+  return available().filter(p => p === anchor || isLocked(p) ||
+    ((p.pos === "DST" || p.pos === "K" || p.salary >= (p.pos === "QB" ? f.QB : f.other)) && !(noQ && p.status === "Q")));
 }
 const balancedRule = () => `no QB under ${fmt$(floors().QB)}, no RB, WR or TE under ${fmt$(floors().other)}` +
-  ($("noq").checked ? ", and no Questionable players" : "");
+  (state.mode === "showdown" ? " (FLEX price)" : "") + ($("noq").checked ? ", and no Questionable players" : "");
+const lockNote = () => state.locks.size ? ` Your ${state.locks.size} locked player${state.locks.size > 1 ? "s are" : " is"} included.` : "";
 
 const BUILDS = {
+  mine: {
+    title: "Best Around My Locks",
+    explain: () => state.locks.size
+      ? `The five highest-projected lineups that include your ${state.locks.size} locked player${state.locks.size > 1 ? "s" : ""}, filled with any healthy players.`
+      : "",
+    run: async () => state.locks.size ? topN(available(), 5) : [],
+    empty: "Lock at least one player on the projections board first, then build again.",
+  },
   balanced: {
     title: "Top 5 Balanced",
-    explain: () => `The five highest-projected lineups with ${balancedRule()}.`,
+    explain: () => `The five highest-projected lineups with ${balancedRule()}.` + lockNote(),
     run: async () => topN(balancedPool(), 5),
   },
   projected: {
     title: "Top 5 Projected",
-    explain: () => "The five highest projected point totals possible under the cap, with any healthy player allowed.",
+    explain: () => "The five highest projected point totals possible under the cap, with any healthy player allowed." + lockNote(),
     run: async () => topN(available(), 5),
   },
 };
 for (const pos of ["QB", "RB", "WR", "TE"]) {
   BUILDS[pos] = {
     title: `Top ${pos} Lineup`,
-    anchor: () => available().filter(p => p.pos === pos).sort((a, b) => b.proj - a.proj)[0],
-    explain() { const a = this.anchor(); return a ? `Starts with ${a.name}, the top projected ${pos} (${a.proj.toFixed(2)} pts, ${fmt$(a.salary)}), then fills the highest-projected lineup around him with ${balancedRule()}.` : ""; },
-    async run() { const a = this.anchor(); if (!a) return []; const lu = await solveOne(balancedPool(a), { locks: [a.pid] }); return lu ? [lu] : []; },
+    anchor: () => state.players.filter(p => p.pos === pos && p.proj > 0 && !NEVER_USE.has(p.status)).sort((a, b) => b.proj - a.proj)[0],
+    explain() {
+      const a = this.anchor(); if (!a) return "";
+      const role = state.mode === "showdown" ? `at Captain (${(a.proj * 1.5).toFixed(2)} pts, ${fmt$(a.cptSalary)})` : `(${a.proj.toFixed(2)} pts, ${fmt$(a.salary)})`;
+      return `Starts with ${a.name}, the top projected ${pos}, ${role}, then fills the highest-projected lineup around him with ${balancedRule()}.` + lockNote();
+    },
+    async run() {
+      const a = this.anchor(); if (!a) return [];
+      const locks = new Map(state.locks);
+      locks.set(a.pid, state.mode === "showdown" ? "cpt" : (locks.get(a.pid) || "any"));
+      const lu = await solveOne(balancedPool(a), { locks });
+      return lu ? [lu] : [];
+    },
   };
 }
 
 async function topN(pool, n) {
   const lineups = [];
   for (let k = 0; k < n; k++) {
-    const lu = await solveOne(pool, { previous: lineups, minDiff: 1 });
+    const lu = await solveOne(pool, { locks: state.locks, previous: lineups, minDiff: 1 });
     if (!lu) break;
     lineups.push(lu);
   }
@@ -528,12 +714,15 @@ async function topN(pool, n) {
 
 function lineupHTML(lu, label, anchorPid) {
   const left = state.cap - lu.salary;
-  const rows = lu.slots.map(([slot, p]) => `<tr class="${p.pid === anchorPid ? "anchor" : ""}">
-    <td class="slot">${slot}</td>
-    <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)} ${p.pos !== slot ? p.pos : ""}</small></td>
+  const rows = lu.slots.map(([slot, e]) => {
+    const p = e.p, lk = isLocked(p);
+    return `<tr class="${String(p.pid) === String(anchorPid) || lk ? "anchor" : ""}">
+    <td class="slot${slot === "CPT" ? " cpt" : ""}">${slot}</td>
+    <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)} ${p.pos !== slot ? p.pos : ""}${lk ? " - locked" : ""}</small></td>
     <td class="muted">${esc(p.game)}</td>
-    <td class="r num">${fmt$(p.salary)}</td>
-    <td class="r num"><b>${p.proj.toFixed(2)}</b></td></tr>`).join("");
+    <td class="r num">${fmt$(e.salary)}</td>
+    <td class="r num"><b>${e.proj.toFixed(2)}</b></td></tr>`;
+  }).join("");
   return `<article class="lineup">
     <div class="lineup-top"><h3>${esc(label)}</h3>
       <div class="figs num"><span><b>${lu.proj.toFixed(2)}</b> pts</span><span>${fmt$(lu.salary)}</span><span class="${left ? "left-gold" : "muted"}">${fmt$(left)} left</span></div></div>
@@ -542,13 +731,15 @@ function lineupHTML(lu, label, anchorPid) {
 }
 
 function uploadCSV(lineups) {
-  return "QB,RB,RB,WR,WR,WR,TE,FLEX,DST\n" + lineups.map(lu => lu.players.map(p => p.id).join(",")).join("\n") + "\n";
+  return M().header + "\n" + lineups.map(lu => lu.picks.map(e => e.id).join(",")).join("\n") + "\n";
 }
 
 async function runBuild(keys) {
   state.lastBuild = keys;
   document.querySelectorAll(".build").forEach(b => b.setAttribute("aria-pressed", keys.length === 1 && b.dataset.build === keys[0]));
   const box = $("results");
+  const problem = lockProblems();
+  if (problem) { box.innerHTML = `<div class="empty">${esc(problem)} Remove a locked player and build again.</div>`; return; }
   box.innerHTML = `<div class="empty">Building ${keys.length > 1 ? "all six lineup types" : BUILDS[keys[0]].title}...</div>`;
   document.querySelectorAll(".build, #buildall").forEach(b => b.disabled = true);
   try {
@@ -558,14 +749,18 @@ async function runBuild(keys) {
       const lineups = await b.run();
       const anchorPid = b.anchor ? b.anchor()?.pid : null;
       all.push(...lineups);
-      html += `<div class="result-head"><h2>${esc(b.title)}</h2></div><p class="explain">${esc(b.explain())}</p>`;
+      html += `<div class="result-head"><h2>${esc(b.title)}</h2></div>`;
+      const ex = b.explain(); if (ex) html += `<p class="explain">${esc(ex)}</p>`;
+      const why = b.empty && !state.locks.size ? b.empty
+        : state.locks.size ? "No lineup fits under the cap with your locked players and these rules. Remove a lock or lower the salary minimums in Balanced lineup rules."
+        : "No lineup fits these rules under the cap. Lower the salary minimums in Balanced lineup rules.";
       html += lineups.length ? lineups.map((lu, i) => lineupHTML(lu, lineups.length > 1 ? `Lineup ${i + 1}` : b.title, anchorPid)).join("")
-        : `<div class="empty">No lineup fits these rules under the cap. Lower the lowest salary allowed in Balanced lineup rules.</div>`;
+        : `<div class="empty">${esc(why)}</div>`;
     }
     if (all.length) {
       const csv = uploadCSV(all);
       const href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-      html += `<div class="export"><a href="${href}" download="dk_lineups_week${state.week}.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
+      html += `<div class="export"><a href="${href}" download="dk_${state.mode}_lineups_week${state.week}.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
         <button type="button" id="copycsv">Copy upload file</button><span class="muted">On DraftKings: Lineups, then Upload Lineups.</span></div>`;
       box.innerHTML = html;
       $("copycsv").onclick = async e => {
@@ -578,20 +773,31 @@ async function runBuild(keys) {
 }
 
 /* ---------- Wiring ---------- */
-$("postabs").addEventListener("click", e => {
-  const b = e.target.closest("button"); if (!b) return;
-  state.pos = b.dataset.pos;
-  document.querySelectorAll("#postabs button").forEach(x => x.setAttribute("aria-pressed", x === b));
-  renderBoard();
+$("postabs").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { setPos(b.dataset.pos); renderBoard(); } });
+$("board").addEventListener("click", e => {
+  const b = e.target.closest(".lockbtn"); if (!b) return;
+  const p = playerById(b.dataset.pid); if (p) toggleLock(p.pid, b.dataset.lock);
 });
+$("chips").addEventListener("click", e => {
+  const b = e.target.closest("[data-unlock]"); if (!b) return;
+  const p = playerById(b.dataset.unlock); if (p) { state.locks.delete(p.pid); saveLocks(); renderAll(); }
+});
+$("clearlocks").addEventListener("click", () => { state.locks.clear(); saveLocks(); renderAll(); });
 $("builds").addEventListener("click", e => { const b = e.target.closest(".build"); if (b) runBuild([b.dataset.build]); });
 $("buildall").addEventListener("click", () => runBuild(["balanced", "projected", "QB", "RB", "WR", "TE"]));
 $("refresh").addEventListener("click", () => { state.projCache = {}; loadAll(); });
+$("mode").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || b.dataset.mode === state.mode) return;
+  state.mode = b.dataset.mode; store.set("mode", state.mode);
+  state.slate = null; state.lastBuild = null;
+  document.querySelectorAll(".build").forEach(x => x.setAttribute("aria-pressed", "false"));
+  loadAll();
+});
 $("slate").addEventListener("change", async e => {
   state.slate = state.slates.find(s => s.id === +e.target.value);
   $("refresh").disabled = true;
-  try { await loadSlate(); renderBoard(); if (state.lastBuild) await runBuild(state.lastBuild); }
-  catch (err) { showBanner(`Could not load that slate: ${err.message}.`); }
+  try { await loadSlate(); showBanner(""); renderAll(); if (state.lastBuild) await runBuild(state.lastBuild); }
+  catch (err) { showDKFallback(err.message); }
   finally { $("refresh").disabled = false; }
 });
 ["minqb", "minsal", "noq"].forEach(id => $(id).addEventListener("change", () => { if (state.lastBuild) runBuild(state.lastBuild); }));

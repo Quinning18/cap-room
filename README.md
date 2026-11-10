@@ -9,11 +9,18 @@ Builds the highest-projected DraftKings NFL lineups under the salary cap, using:
 - **Every player on the slate** is considered, whoever owns them in your league
 
 ## Web app (docs/index.html)
-Open `docs/index.html` in a browser. Each time it opens it pulls the current week's Sleeper projections,
-DraftKings slates, salaries and salary cap, then shows projections by position and six lineup buttons:
-Top 5 Balanced, Top 5 Projected, and Top QB / RB / WR / TE lineups. Lineups are solved in the browser and
-can be downloaded as a DraftKings upload file. If DraftKings refuses the live request, the page asks for
-the salary CSV from any contest page (Export to CSV) instead.
+Live at https://quinning18.github.io/cap-room/. Each time it opens it pulls the current week's Sleeper
+projections, DraftKings slates, salaries and salary cap.
+
+- **Classic or Showdown** (Captain Mode: 1 CPT at 1.5x points and salary + 5 FLEX, both teams required).
+- **Projections board** by position, with salary and points per $1K.
+- **Lock** any player (in Showdown, **CPT** locks him as Captain). Locked players go into every lineup
+  built, and **Best Around My Locks** builds the top 5 lineups around them. Locks are remembered per slate
+  on your device.
+- **Lineup types:** Top 5 Balanced, Top 5 Projected, and Top QB / RB / WR / TE (in Showdown, that player
+  is Captain). Balanced salary minimums are adjustable.
+- Lineups download as a DraftKings upload file. If DraftKings refuses the live request, the page asks for
+  the salary CSV from any contest page (Export to CSV) instead.
 
 ## Command line setup
 ```
