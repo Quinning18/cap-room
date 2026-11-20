@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Cap Room</title>
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#010a1e">
+<link rel="preload" as="image" href="logo.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -154,10 +158,35 @@ td.slot.cpt { color: var(--gold); }
   .lineup td.muted { display: none; }
   .player small { display: block; margin-left: 0; }
 }
+/* Opening splash: the logo on its own navy background, fades out after ~2 seconds or on tap. */
+.splash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; align-content: center; gap: 22px;
+  background: #010a1e; cursor: pointer;   /* the logo's own background color, so its edges disappear */
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  transition: opacity .45s ease, visibility .45s; }
+.splash img { width: min(78vw, 64vh, 560px); height: auto; aspect-ratio: 1; display: block; }
+.splash .load { width: min(46vw, 260px); height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.splash .load span { display: block; height: 100%; width: 100%; background: #4cf03c; transform-origin: left; transform: scaleX(0); animation: splashload 1.8s ease-out forwards; }
+.splash.done { opacity: 0; visibility: hidden; pointer-events: none; }
+@keyframes splashload { to { transform: scaleX(1); } }
+@media (prefers-reduced-motion: no-preference) {
+  .splash img { animation: splashin .7s cubic-bezier(.2, .8, .2, 1) both; }
+  @keyframes splashin { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: scale(1); } }
+}
+@media (prefers-reduced-motion: reduce) { .splash .load span { animation: none; transform: scaleX(1); } }
 @media (prefers-reduced-motion: no-preference) { .lineup { animation: rise .25s ease-out both; } @keyframes rise { from { transform: translateY(4px); opacity: .6; } } }
 </style>
 </head>
 <body>
+<div class="splash" id="splash" role="img" aria-label="Cap Room"><img src="logo.jpg" alt="Cap Room" width="900" height="900"><div class="load"><span></span></div></div>
+<script>
+(() => {   // opening splash: hide after ~2 seconds, or right away on tap / key press
+  const el = document.getElementById("splash");
+  const hide = () => { if (el.classList.contains("done")) return; el.classList.add("done"); setTimeout(() => el.remove(), 600); };
+  setTimeout(hide, 2000);
+  el.addEventListener("click", hide);
+  addEventListener("keydown", hide, { once: true });
+})();
+</script>
 <div class="wrap">
   <header>
     <div>
