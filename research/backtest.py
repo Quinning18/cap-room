@@ -3,10 +3,11 @@
 Field model: 300 lineups optimized on noisy Sleeper projections (half stacked in NFL) stand in for opponents.
 Cash = beat the field median. GPP = reach the field's 99th percentile / beat the whole field.
 """
-import sys, json, math, re, unicodedata, collections, statistics as st, random
+import sys, os, json, math, re, unicodedata, collections, statistics as st, random
 import numpy as np, highspy
-sys.path.insert(0, sys.argv[1]); from data import load_nfl, load_nba, BT
-SPORT = sys.argv[2]
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); from data import load_nfl, load_nba, BT
+# Usage: python backtest.py <unused> nfl|nba. When imported (research/nightly.py), set backtest.SPORT first.
+SPORT = sys.argv[2] if __name__ == "__main__" else "nba"
 rng = np.random.default_rng(7)
 
 SUF = {'jr', 'sr', 'ii', 'iii', 'iv', 'v'}
@@ -276,4 +277,5 @@ def run():
     for name, v in res.items():
         if name.startswith('_'): continue
         print(f"{name:34} {np.mean([x[0] for x in v]):9.0%} {np.mean([x[1] for x in v]):10.0%} {np.mean([x[2] for x in v]):7.0%} {np.mean([x[3] for x in v]):5.0%}")
-run()
+if __name__ == "__main__":
+    run()

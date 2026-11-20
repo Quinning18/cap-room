@@ -1,0 +1,6 @@
+{
+  "updated": "2026-11-20",
+  "note": "Tuned nightly by research/nightly.py. Values outside the allowed ranges are ignored by the app.",
+  "lineWeight": { "nba": 0.5, "nfl": 0.5 },
+  "sd": { "nba": [4, 0.2], "nfl": [2, 0.45], "nflDst": 5.2 }
+}
