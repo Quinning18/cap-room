@@ -39,6 +39,7 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--ink); font: 15px/1.45 var(--font-body);
@@ -136,6 +137,10 @@ tr.excluded td:not(.lockcell) { opacity: .45; text-decoration: line-through; }
 .chip.out { border-color: var(--warn); }
 .chip.out b { color: var(--warn); }
 .build.mine { border-style: dashed; }
+.stylebar { display: grid; gap: 6px; }
+.gppbox { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+.simstats { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px; font-size: .82rem; color: var(--muted); border-top: 1px solid var(--line); }
+.simstats b { color: var(--ink); }
 td.slot.cpt { color: var(--gold); }
 .pos-inline { display: none; }
 @media (max-width: 560px) {
@@ -192,9 +197,26 @@ td.slot.cpt { color: var(--gold); }
         <div class="chips" id="chips"></div>
         <div class="lock-warn" id="lockwarn" hidden></div>
       </div>
+      <div class="stylebar">
+        <div class="mode" id="style" role="group" aria-label="Contest style">
+          <button type="button" data-style="cash" aria-pressed="true">Cash</button>
+          <button type="button" data-style="gpp" aria-pressed="false">Tournament</button>
+        </div>
+        <p class="explain" id="stylehint"></p>
+      </div>
       <div class="builds" id="builds"></div>
-      <div class="controls"><button type="button" class="primary" id="buildall">Build all</button></div>
-      <details class="settings">
+      <div class="controls" id="cashctl"><button type="button" class="primary" id="buildall">Build all</button></div>
+      <div class="gppbox" id="gppbox" hidden>
+        <div class="settings-grid">
+          <label for="gppcount">Lineups <select id="gppcount"><option>1</option><option selected>5</option><option>10</option><option>20</option></select></label>
+          <label for="gppstack" id="gppstackwrap">NFL stacking <select id="gppstack">
+            <option value="qb2bb" selected>QB + 2 pass-catchers + bring-back (best in tests)</option>
+            <option value="qb1">QB + 1 pass-catcher</option>
+            <option value="none">No stacking rule</option></select></label>
+        </div>
+        <div class="controls"><button type="button" class="primary" id="rungpp">Simulate &amp; build</button></div>
+      </div>
+      <details class="settings" id="balsettings">
         <summary>Balanced lineup rules</summary>
         <div class="settings-grid">
           <label for="minqb" data-sport-only="nfl">QB salary at least <input type="number" id="minqb" min="0" max="12000" step="100" value="5000"></label>
@@ -258,11 +280,12 @@ const store = {
 };
 
 const state = { sport: store.get("sport", "nfl"), mode: store.get("mode", "classic"), slates: [], slate: null, cap: 50000,
-  players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, locks: new Map(), excl: new Set() };
+  players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, locks: new Map(), excl: new Set(), style: store.get("style", "cash") };
 if (!SPORTS[state.sport]) state.sport = "nfl";
 const SP = () => SPORTS[state.sport];
 const M = () => SP().modes[state.mode];
 const isNBA = () => state.sport === "nba";
+const oppOf = p => { const t = (p.game || "").split(/ @ | vs /); return t.length === 2 ? (t[0] === p.team ? t[1] : t[0]) : null; };
 const etDate = iso => iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) : "";
 
 async function getJSON(url) {
@@ -538,6 +561,14 @@ function applyMode() {
      <button type="button" class="build" data-build="projected"><strong>Top 5 Projected</strong><span>The 5 highest-scoring lineups possible</span></button>` +
     sp.anchors.map(pos => `<button type="button" class="build" data-build="${pos}"><strong>Top ${pos} Lineup</strong><span>${role(pos)}</span></button>`).join("");
   $("buildall").textContent = `Build all ${2 + sp.anchors.length}`;
+  const gpp = state.style === "gpp";
+  document.querySelectorAll("#style button").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === state.style));
+  $("builds").hidden = $("cashctl").hidden = $("balsettings").hidden = gpp;
+  $("gppbox").hidden = !gpp;
+  $("gppstackwrap").hidden = isNBA() || sd;
+  $("stylehint").textContent = gpp
+    ? "For tournaments (GPPs). Simulates the slate 1,500 times with real player correlations, builds a field of likely opponent lineups, and keeps the lineups that most often finish in the top 1%."
+    : "For cash games (double-ups, 50/50s, head-to-heads). Maximizes projected points, the approach that cashed most often in backtests.";
   document.querySelectorAll("[data-sport-only]").forEach(el => el.hidden = el.dataset.sportOnly !== state.sport);
   $("footer").textContent = sp.footer + " Showdown captains score 1.5x and cost 1.5x. Salaries, slates and the salary cap come from DraftKings each time the page loads.";
 }
@@ -627,28 +658,49 @@ function renderBoard() {
 function renderAll() { renderBoard(); renderLocks(); }
 
 /* ---------- Optimizer (HiGHS integer programming) ---------- */
-// The HiGHS WebAssembly build becomes unstable after several solves in one page, so every
-// solve runs in its own short-lived Web Worker with a clean copy of the solver.
+// Solves run in a small pool of Web Workers. Each worker is retired after a few solves because the
+// HiGHS WebAssembly build can become unstable after many solves; a failed solve retries on a fresh worker.
 const WORKER_URL = URL.createObjectURL(new Blob([`
   importScripts("${HIGHS_CDN}highs.js");
+  let highs = null;
   onmessage = async e => {
     try {
-      const highs = await Module({ locateFile: f => "${HIGHS_CDN}" + f });
-      const r = highs.solve(e.data);
+      if (!highs) highs = await Module({ locateFile: f => "${HIGHS_CDN}" + f });
+      const r = highs.solve(e.data.lp);
       const cols = {};
       for (const [k, c] of Object.entries(r.Columns || {})) cols[k] = c.Primal;
-      postMessage({ status: r.Status, cols });
-    } catch (err) { postMessage({ error: String(err && err.message || err) }); }
+      postMessage({ id: e.data.id, status: r.Status, cols });
+    } catch (err) { postMessage({ id: e.data.id, error: String(err && err.message || err) }); }
   };`], { type: "text/javascript" }));
 
-function solveLP(lp) {
+const POOL_SIZE = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+const SOLVES_PER_WORKER = 4;
+const solverPool = { idle: [], busy: 0, queue: [], seq: 0 };
+function newSolverWorker() { const w = new Worker(WORKER_URL); w.uses = 0; return w; }
+function runOnWorker(w, lp) {
   return new Promise((resolve, reject) => {
-    const w = new Worker(WORKER_URL);
-    const timer = setTimeout(() => { w.terminate(); reject(new Error("the solver took too long")); }, 60000);
-    w.onmessage = e => { clearTimeout(timer); w.terminate(); e.data.error ? reject(new Error(e.data.error)) : resolve(e.data); };
-    w.onerror = e => { clearTimeout(timer); w.terminate(); reject(new Error(e.message || "the solver could not load")); };
-    w.postMessage(lp);
+    const id = ++solverPool.seq;
+    const timer = setTimeout(() => { w.terminate(); w.dead = true; reject(new Error("the solver took too long")); }, 60000);
+    w.onmessage = e => { if (e.data.id !== id) return; clearTimeout(timer); e.data.error ? reject(new Error(e.data.error)) : resolve(e.data); };
+    w.onerror = e => { clearTimeout(timer); w.dead = true; reject(new Error(e.message || "the solver could not load")); };
+    w.uses++;
+    w.postMessage({ id, lp });
   });
+}
+async function withWorker(fn) {
+  if (solverPool.busy >= POOL_SIZE) await new Promise(r => solverPool.queue.push(r));
+  solverPool.busy++;
+  let w = solverPool.idle.pop() || newSolverWorker();
+  try { return await fn(w); }
+  finally {
+    if (w.dead || w.uses >= SOLVES_PER_WORKER) w.terminate(); else solverPool.idle.push(w);
+    solverPool.busy--;
+    const next = solverPool.queue.shift(); if (next) next();
+  }
+}
+async function solveLP(lp) {
+  try { return await withWorker(w => runOnWorker(w, lp)); }
+  catch (e) { const w = newSolverWorker(); try { return await runOnWorker(w, lp); } finally { w.terminate(); } }
 }
 
 function lpSum(terms) {  // keep LP-format lines short
@@ -672,10 +724,13 @@ function entriesFor(pool) {
 }
 
 // locks: Map pid -> "any" | "cpt". previous: earlier lineups this lineup must differ from (by players).
-async function solveOne(pool, { locks = new Map(), previous = [], minDiff = 1 } = {}) {
+// values: optional Map pid -> objective value (e.g. a simulated outcome) used instead of the projection.
+// stack / bringback / noDefVsOff: NFL Classic correlation rules (QB + N pass-catchers, an opposing player, no DST vs own players).
+async function solveOne(pool, { locks = new Map(), previous = [], minDiff = 1, values = null, stack = 0, bringback = false, noDefVsOff = false } = {}) {
   const E = entriesFor(pool), v = i => "x" + i, size = M().size;
   const sum = (filter, coef) => lpSum(E.map((e, i) => filter(e) ? `+ ${coef ? coef(e) : 1} ${v(i)}` : null).filter(Boolean));
-  const lines = ["Maximize", " obj: " + lpSum(E.map((e, i) => `+ ${e.proj.toFixed(2)} ${v(i)}`)), "Subject To"];
+  const objOf = e => values ? (values.get(e.p.pid) ?? 0) * (e.slot === "CPT" ? 1.5 : 1) : e.proj;
+  const lines = ["Maximize", " obj: " + lpSum(E.map((e, i) => `+ ${Math.max(0, objOf(e)).toFixed(3)} ${v(i)}`)), "Subject To"];
   lines.push(" cap: " + sum(() => true, e => e.salary) + " <= " + state.cap);
   lines.push(" size: " + sum(() => true) + " = " + size);
   if (state.mode === "showdown" || isNBA()) pool.forEach((p, k) => lines.push(` once${k}: ` + sum(e => e.p === p) + " <= 1"));
@@ -691,6 +746,20 @@ async function solveOne(pool, { locks = new Map(), previous = [], minDiff = 1 } 
     lines.push(" wr: " + sum(e => e.p.pos === "WR") + " >= 3");
     lines.push(" te1: " + sum(e => e.p.pos === "TE") + " >= 1");
     lines.push(" te2: " + sum(e => e.p.pos === "TE") + " <= 2");
+    E.forEach((e, i) => {
+      if (e.p.pos === "QB" && stack) {
+        const mates = E.map((f, j) => ["WR", "TE"].includes(f.p.pos) && f.p.team === e.p.team ? `+ 1 ${v(j)}` : null).filter(Boolean);
+        if (mates.length) lines.push(` stk${i}: ${lpSum(mates)} - ${stack} ${v(i)} >= 0`);
+        const opp = oppOf(e.p);
+        const bb = E.map((f, j) => bringback && ["WR", "TE", "RB"].includes(f.p.pos) && f.p.team === opp ? `+ 1 ${v(j)}` : null).filter(Boolean);
+        if (bb.length) lines.push(` bb${i}: ${lpSum(bb)} - 1 ${v(i)} >= 0`);
+      }
+      if (e.p.pos === "DST" && noDefVsOff) {
+        const opp = oppOf(e.p);
+        const vs = E.map((f, j) => f.p.team === opp && f.p.pos !== "DST" ? `+ 1 ${v(j)}` : null).filter(Boolean);
+        if (vs.length) lines.push(` dvo${i}: ${lpSum(vs)} + 8 ${v(i)} <= 8`);
+      }
+    });
   }
   let k = 0;
   for (const [pid, kind] of locks) {
@@ -790,6 +859,137 @@ function anchorBuild(pos) {
 }
 const buildFor = key => BUILDS[key] || anchorBuild(key);
 
+/* ---------- Tournament engine: correlated simulation ---------- */
+// Correlations between players' results relative to projection, measured on 2026 NFL weeks 1-10
+// (Sleeper projections vs. actual DraftKings points). NBA teammates/opponents measured near zero.
+const NFL_SAME = { "QB|WR1": .37, "QB|WR2": .24, "QB|WR3": .25, "QB|TE1": .30, "QB|RB1": .11, "QB|RB2": .05, "RB1|WR1": .06,
+  "WR1|WR2": -.07, "WR1|WR3": -.07, "WR2|WR3": -.07, "RB1|RB2": -.03, "DST|QB": -.09, "DST|K": .15, "K|QB": .2 };
+const NFL_OPP = { "QB|QB": .22, "QB|WR1": .05, "QB|RB1": .10, "DST|QB": -.43, "DST|RB1": -.29, "DST|RB2": -.15, "DST|WR1": -.25,
+  "DST|WR2": -.2, "DST|WR3": -.15, "DST|TE1": -.2, "DST|K": -.25 };
+const pairCorr = (tab, a, b) => tab[a + "|" + b] ?? tab[b + "|" + a] ?? 0;
+
+function gauss() { let u = 0; while (!u) u = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random()); }
+// Spread of outcomes around the projection, fitted on the same 2026 data.
+function sdOf(p) {
+  if (isNBA()) return 4 + 0.2 * p.proj;
+  if (p.pos === "DST") return 5.2;
+  if (p.pos === "K") return 4;
+  return 2 + 0.45 * p.proj;
+}
+function cholesky(C) {
+  const n = C.length, L = C.map(() => new Float64Array(n));
+  for (let i = 0; i < n; i++) for (let j = 0; j <= i; j++) {
+    let s = C[i][j];
+    for (let k = 0; k < j; k++) s -= L[i][k] * L[j][k];
+    if (i === j) { if (s <= 1e-9) return null; L[i][i] = Math.sqrt(s); } else L[i][j] = s / L[j][j];
+  }
+  return L;
+}
+
+/* n simulated outcomes for every player: out[s * m + i]. NFL draws are correlated within each game. */
+function simulate(players, n) {
+  const m = players.length, out = new Float64Array(n * m), groups = [];
+  if (!isNBA()) {
+    const role = new Map(), byTeam = {};
+    players.forEach((p, i) => (byTeam[p.team] ||= []).push(i));
+    for (const ids of Object.values(byTeam)) for (const pos of ["QB", "RB", "WR", "TE", "DST", "K"]) {
+      ids.filter(i => players[i].pos === pos).sort((a, b) => players[b].proj - players[a].proj)
+        .forEach((i, k) => role.set(i, ["QB", "DST", "K"].includes(pos) ? pos : pos + (k + 1)));
+    }
+    const byGame = {};
+    players.forEach((p, i) => { if (/^(QB|DST|K|RB[12]|WR[123]|TE1)$/.test(role.get(i))) (byGame[p.game] ||= []).push(i); });
+    for (const ids of Object.values(byGame)) {
+      let shrink = 1, L = null;
+      while (!L && shrink > 0.2) {
+        const C = ids.map((i, a) => ids.map((j, b) => a === b ? 1 :
+          shrink * pairCorr(players[i].team === players[j].team ? NFL_SAME : NFL_OPP, role.get(i), role.get(j))));
+        L = cholesky(C); shrink -= 0.1;
+      }
+      if (L) groups.push({ ids, L });
+    }
+  }
+  const sd = players.map(sdOf), proj = players.map(p => p.proj);
+  const lsig = players.map((p, i) => proj[i] > 0.5 ? Math.sqrt(Math.log1p((sd[i] / proj[i]) ** 2)) : 0);
+  const z = new Float64Array(m);
+  for (let s = 0; s < n; s++) {
+    for (let i = 0; i < m; i++) z[i] = gauss();
+    for (const { ids, L } of groups) {
+      const raw = ids.map(i => z[i]);
+      ids.forEach((i, a) => { let v = 0; for (let b = 0; b <= a; b++) v += L[a][b] * raw[b]; z[i] = v; });
+    }
+    for (let i = 0; i < m; i++) {
+      const p = players[i];
+      // Right-skewed outcomes (lognormal with the same mean and spread); defenses can go negative.
+      out[s * m + i] = proj[i] <= 0.5 ? 0 : p.pos === "DST" ? proj[i] + sd[i] * z[i]
+        : proj[i] * Math.exp(lsig[i] * z[i] - lsig[i] * lsig[i] / 2);
+    }
+  }
+  return out;
+}
+
+const lineupKey = lu => lu.picks.map(e => e.p.pid + "|" + (e.slot === "CPT" ? "C" : "")).sort().join(",");
+
+/* Tournament build:
+   1. A simulated field: lineups other players would build (optimizer on noisy projections, half stacked in NFL).
+   2. Candidates: lineups optimized for individual simulated outcomes, with stacking rules (NFL Classic).
+   3. Score everything on 1,500 fresh simulations; keep the candidates that most often finish in the
+      top 1% of the field or beat the whole field, without repeating the same core. */
+async function runTournament(count, stackRule, progress) {
+  const classicNFL = !isNBA() && state.mode === "classic";
+  const fieldPool = state.players.filter(p => p.proj > 0 && !NEVER_USE.has(p.status));
+  const myPool = available();
+  const all = [...new Set([...fieldPool, ...myPool])];
+  const idx = new Map(all.map((p, i) => [p.pid, i]));
+  const FIELD = 80, CANDS = 70, SIMS = 1500, m = all.length;
+  let done = 0; const total = FIELD + CANDS;
+  const tick = () => progress(`Building lineups: ${++done} of ${total}`);
+
+  const fieldJobs = Array.from({ length: FIELD }, (_, k) => {
+    const values = new Map(fieldPool.map(p => [p.pid, p.proj * Math.exp(0.15 * gauss())]));
+    const opts = classicNFL && k % 2 ? { values, stack: 1, noDefVsOff: true } : { values };
+    return solveOne(fieldPool, opts).then(lu => (tick(), lu)).catch(() => (tick(), null));
+  });
+  const draws = simulate(all, CANDS);
+  const candJobs = Array.from({ length: CANDS }, (_, k) => {
+    const values = new Map(all.map((p, i) => [p.pid, 0.5 * p.proj + 0.5 * draws[k * m + i]]));
+    const opts = { values, locks: state.locks };
+    if (classicNFL) Object.assign(opts, stackRule === "qb2bb" && k % 3 ? { stack: 2, bringback: true, noDefVsOff: true }
+      : stackRule === "none" ? { noDefVsOff: true } : { stack: 1, noDefVsOff: true });
+    return solveOne(myPool, opts).then(lu => (tick(), lu)).catch(() => (tick(), null));
+  });
+  const field = (await Promise.all(fieldJobs)).filter(Boolean);
+  const seen = new Set();
+  const cands = (await Promise.all(candJobs)).filter(lu => lu && !seen.has(lineupKey(lu)) && seen.add(lineupKey(lu)));
+  if (!cands.length) return { lineups: [], own: new Map() };
+
+  progress(`Simulating ${SIMS.toLocaleString()} versions of the slate...`);
+  await new Promise(r => setTimeout(r, 30));
+  const sims = simulate(all, SIMS);
+  const scoreIn = (lu, s) => lu.picks.reduce((a, e) => a + sims[s * m + idx.get(e.p.pid)] * (e.slot === "CPT" ? 1.5 : 1), 0);
+  const top1 = new Float64Array(cands.length), win = new Float64Array(cands.length), mean = new Float64Array(cands.length);
+  const fs = new Float64Array(field.length);
+  for (let s = 0; s < SIMS; s++) {
+    for (let f = 0; f < field.length; f++) fs[f] = scoreIn(field[f], s);
+    const sorted = Float64Array.from(fs).sort();
+    const line = sorted[Math.min(sorted.length - 1, Math.floor(0.99 * (sorted.length - 1)))], best = sorted[sorted.length - 1];
+    cands.forEach((lu, c) => { const v = scoreIn(lu, s); mean[c] += v / SIMS; if (v >= line) top1[c]++; if (v > best) win[c]++; });
+  }
+  const own = new Map();
+  for (const lu of field) for (const e of lu.picks) own.set(e.p.pid, (own.get(e.p.pid) || 0) + 1 / field.length);
+  const order = cands.map((lu, c) => c).sort((a, b) => (top1[b] + 2 * win[b]) - (top1[a] + 2 * win[a]) || mean[b] - mean[a]);
+  const maxShared = state.mode === "showdown" ? 4 : M().size - 3;
+  const chosen = [];
+  for (const c of order) {
+    const lu = cands[c], ids = new Set(lu.picks.map(e => e.p.pid));
+    if (chosen.every(x => x.picks.filter(e => ids.has(e.p.pid)).length <= maxShared)) {
+      chosen.push(Object.assign(lu, { top1: top1[c] / SIMS, win: win[c] / SIMS, simMean: mean[c],
+        own: lu.picks.reduce((a, e) => a + (own.get(e.p.pid) || 0), 0) }));
+    }
+    if (chosen.length === count) break;
+  }
+  return { lineups: chosen, own };
+}
+
 async function topN(pool, n) {
   const lineups = [];
   for (let k = 0; k < n; k++) {
@@ -801,12 +1001,13 @@ async function topN(pool, n) {
 }
 
 function lineupHTML(lu, label, anchorPid) {
-  const left = state.cap - lu.salary;
+  const left = state.cap - lu.salary, sim = lu.top1 != null;
   const rows = lu.slots.map(([slot, e]) => {
     const p = e.p, lk = isLocked(p);
+    const own = sim && state.ownEst ? ` - own ${Math.round(100 * (state.ownEst.get(p.pid) || 0))}%` : "";
     return `<tr class="${String(p.pid) === String(anchorPid) || lk ? "anchor" : ""}">
     <td class="slot${slot === "CPT" ? " cpt" : ""}">${slot}</td>
-    <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)} ${p.pos !== slot ? esc(p.pos) : ""}${lk ? " - locked" : ""}</small></td>
+    <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)} ${p.pos !== slot ? esc(p.pos) : ""}${lk ? " - locked" : ""}${own}</small></td>
     <td class="muted">${esc(p.game)}</td>
     <td class="r num">${fmt$(e.salary)}</td>
     <td class="r num"><b>${e.proj.toFixed(2)}</b></td></tr>`;
@@ -815,6 +1016,8 @@ function lineupHTML(lu, label, anchorPid) {
     <div class="lineup-top"><h3>${esc(label)}</h3>
       <div class="figs num"><span><b>${lu.proj.toFixed(2)}</b> pts</span><span>${fmt$(lu.salary)}</span><span class="${left ? "left-gold" : "muted"}">${fmt$(left)} left</span></div></div>
     <div class="table-scroll" style="max-height:none;border-top:0"><table><tbody>${rows}</tbody></table></div>
+    ${sim ? `<div class="simstats num"><span>Top 1%: <b>${(100 * lu.top1).toFixed(1)}%</b> of sims</span><span>Beat whole field: <b>${(100 * lu.win).toFixed(1)}%</b></span>` +
+      `<span>Sim average: <b>${lu.simMean.toFixed(1)}</b></span><span>Est. total ownership: <b>${Math.round(100 * lu.own)}%</b></span></div>` : ""}
   </article>`;
 }
 
@@ -872,6 +1075,31 @@ $("chips").addEventListener("click", e => {
 });
 $("clearlocks").addEventListener("click", () => { state.locks.clear(); state.excl.clear(); saveLocks(); renderAll(); });
 $("builds").addEventListener("click", e => { const b = e.target.closest(".build"); if (b) runBuild([b.dataset.build]); });
+$("style").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || b.dataset.style === state.style) return;
+  state.style = b.dataset.style; store.set("style", state.style); state.lastBuild = null; applyMode();
+  $("results").innerHTML = `<div class="empty">${state.style === "gpp" ? "Choose how many lineups, then Simulate & build." : "Lock any players you want, then pick a lineup type above."}</div>`;
+});
+$("rungpp").addEventListener("click", async () => {
+  const box = $("results"), problem = lockProblems();
+  if (problem) { box.innerHTML = `<div class="empty">${esc(problem)} Remove a locked player and build again.</div>`; return; }
+  const btn = $("rungpp"); btn.disabled = true;
+  const t0 = Date.now();
+  try {
+    const { lineups, own } = await runTournament(+$("gppcount").value, $("gppstack").value, msg => { box.innerHTML = `<div class="empty">${esc(msg)}</div>`; });
+    state.ownEst = own;
+    if (!lineups.length) { box.innerHTML = `<div class="empty">No lineup fits under the cap with these locks and exclusions.</div>`; return; }
+    let html = `<div class="result-head"><h2>Tournament lineups</h2></div><p class="explain">Picked from simulated outcomes in ${Math.round((Date.now() - t0) / 1000)} seconds. ` +
+      `"Top 1%" is how often the lineup finished in the top 1% of a simulated field of opponent lineups; ownership is estimated from that field.${lockNote()}</p>`;
+    html += lineups.map((lu, i) => lineupHTML(lu, `Lineup ${i + 1}`, null)).join("");
+    const csv = uploadCSV(lineups), href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    html += `<div class="export"><a href="${href}" download="dk_${state.sport}_${state.mode}_tournament.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
+      <button type="button" id="copycsv">Copy upload file</button><span class="muted">On DraftKings: Lineups, then Upload Lineups.</span></div>`;
+    box.innerHTML = html;
+    $("copycsv").onclick = async e => { try { await navigator.clipboard.writeText(csv); e.target.textContent = "Copied"; } catch { e.target.textContent = "Copy failed"; } };
+  } catch (e) { box.innerHTML = `<div class="empty">Could not build tournament lineups: ${esc(e.message)}. Press Refresh and try again.</div>`; }
+  finally { btn.disabled = false; }
+});
 $("buildall").addEventListener("click", () => runBuild(["balanced", "projected", ...SP().anchors]));
 $("refresh").addEventListener("click", () => { state.projCache = {}; loadAll(); });
 function switchTo(change) {
