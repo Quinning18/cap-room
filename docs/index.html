@@ -131,6 +131,10 @@ tr.locked td { background: color-mix(in srgb, var(--gold) 9%, transparent); }
 .chip b { font-family: var(--font-display); color: var(--gold); letter-spacing: .04em; }
 .chip button { min-height: 24px; padding: 0 8px; border-radius: 999px; border: 0; font-size: .8rem; color: var(--muted); }
 .lock-warn { color: var(--warn); font-size: .85rem; }
+.lockbtn.out[aria-pressed=true] { background: var(--warn); border-color: var(--warn); color: var(--surface); }
+tr.excluded td:not(.lockcell) { opacity: .45; text-decoration: line-through; }
+.chip.out { border-color: var(--warn); }
+.chip.out b { color: var(--warn); }
 .build.mine { border-style: dashed; }
 td.slot.cpt { color: var(--gold); }
 .pos-inline { display: none; }
@@ -254,7 +258,7 @@ const store = {
 };
 
 const state = { sport: store.get("sport", "nfl"), mode: store.get("mode", "classic"), slates: [], slate: null, cap: 50000,
-  players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, locks: new Map() };
+  players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, locks: new Map(), excl: new Set() };
 if (!SPORTS[state.sport]) state.sport = "nfl";
 const SP = () => SPORTS[state.sport];
 const M = () => SP().modes[state.mode];
@@ -543,11 +547,17 @@ const lockKey = () => `locks.${state.sport}.${state.mode}.${state.slate?.id ?? "
 function loadLocks() {
   const ids = new Set(state.players.map(p => String(p.pid)));
   state.locks = new Map(store.get(lockKey(), []).filter(([pid]) => ids.has(String(pid))));
+  state.excl = new Set(store.get("excl" + lockKey().slice(5), []).filter(pid => ids.has(String(pid))));
 }
-function saveLocks() { store.set(lockKey(), [...state.locks]); }
+function saveLocks() { store.set(lockKey(), [...state.locks]); store.set("excl" + lockKey().slice(5), [...state.excl]); }
 const playerById = pid => state.players.find(p => String(p.pid) === String(pid));
 
 function toggleLock(pid, kind) {
+  if (kind === "out") {
+    if (state.excl.has(pid)) state.excl.delete(pid); else { state.excl.add(pid); state.locks.delete(pid); }
+    saveLocks(); renderBoard(); renderLocks(); return;
+  }
+  state.excl.delete(pid);
   const cur = state.locks.get(pid);
   if (cur === kind) state.locks.delete(pid);
   else {
@@ -575,12 +585,16 @@ function lockProblems() {
 
 function renderLocks() {
   const locked = [...state.locks].map(([pid, kind]) => ({ p: playerById(pid), kind })).filter(x => x.p);
-  $("lockcount").innerHTML = locked.length
-    ? `<b>${locked.length}</b> locked. Locked players go into every lineup you build.`
-    : "No locked players. Use Lock on the projections board to hand-pick players.";
-  $("clearlocks").hidden = !locked.length;
+  const out = [...state.excl].map(playerById).filter(Boolean);
+  const parts = [];
+  if (locked.length) parts.push(`<b>${locked.length}</b> locked (in every lineup)`);
+  if (out.length) parts.push(`<b>${out.length}</b> excluded (never used)`);
+  $("lockcount").innerHTML = parts.length ? parts.join(", ") + "."
+    : "No locked or excluded players. Use Lock or Out on the projections board to hand-pick or remove players.";
+  $("clearlocks").hidden = !locked.length && !out.length;
   $("chips").innerHTML = locked.map(({ p, kind }) => `<span class="chip">${kind === "cpt" ? "<b>CPT</b>" : `<b>${esc(p.pos)}</b>`} ${esc(p.name)}` +
-    `${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<button type="button" data-unlock="${esc(p.pid)}" aria-label="Unlock ${esc(p.name)}">Remove</button></span>`).join("");
+    `${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<button type="button" data-unlock="${esc(p.pid)}" aria-label="Unlock ${esc(p.name)}">Remove</button></span>`).join("") +
+    out.map(p => `<span class="chip out"><b>OUT</b> ${esc(p.name)}<button type="button" data-unlock="${esc(p.pid)}" aria-label="Stop excluding ${esc(p.name)}">Remove</button></span>`).join("");
   const problem = lockProblems();
   $("lockwarn").textContent = problem;
   $("lockwarn").hidden = !problem;
@@ -596,11 +610,11 @@ function renderBoard() {
   const list = state.players.filter(p => (p.proj > 0 || state.locks.has(p.pid)) && (state.pos === "ALL" || p.positions.includes(state.pos)))
     .sort((a, b) => b.proj - a.proj);
   $("board").innerHTML = list.map((p, i) => {
-    const lk = state.locks.get(p.pid);
+    const lk = state.locks.get(p.pid), ex = state.excl.has(p.pid);
     const pidAttr = esc(p.pid);
-    return `<tr class="${lk ? "locked" : ""}">
+    return `<tr class="${lk ? "locked" : ex ? "excluded" : ""}">
     <td class="lockcell"><button type="button" class="lockbtn" data-lock="any" data-pid="${pidAttr}" aria-pressed="${lk === "any"}">${lk === "any" ? "Locked" : "Lock"}</button>${sd
-      ? `<button type="button" class="lockbtn" data-lock="cpt" data-pid="${pidAttr}" aria-pressed="${lk === "cpt"}">CPT</button>` : ""}</td>
+      ? `<button type="button" class="lockbtn" data-lock="cpt" data-pid="${pidAttr}" aria-pressed="${lk === "cpt"}">CPT</button>` : ""}<button type="button" class="lockbtn out" data-lock="out" data-pid="${pidAttr}" aria-pressed="${ex}" aria-label="Exclude ${esc(p.name)}">Out</button></td>
     <td class="r num muted c-rank">${i + 1}</td>
     <td class="player">${esc(p.name)}${p.status ? `<span class="tag">${esc(p.status)}</span>` : ""}<small>${esc(p.team)}<span class="pos-inline"> - ${esc(p.pos)}</span></small></td>
     <td class="c-pos"><span class="pos">${esc(p.pos)}</span></td>
@@ -720,7 +734,8 @@ function orderLineup(picks) {
 
 /* ---------- Player pools and lineup types ---------- */
 const isLocked = p => state.locks.has(p.pid);
-const available = () => state.players.filter(p => isLocked(p) || (p.proj > 0 && !NEVER_USE.has(p.status)));
+const isExcluded = p => state.excl.has(p.pid);
+const available = () => state.players.filter(p => !isExcluded(p) && (isLocked(p) || (p.proj > 0 && !NEVER_USE.has(p.status))));
 const floorFor = p => {
   if (isNBA()) return +$("minnba").value || 0;
   if (p.pos === "DST" || p.pos === "K") return 0;
@@ -758,7 +773,7 @@ const BUILDS = {
 function anchorBuild(pos) {
   return {
     title: `Top ${pos} Lineup`,
-    anchor: () => state.players.filter(p => p.positions.includes(pos) && p.proj > 0 && !NEVER_USE.has(p.status)).sort((a, b) => b.proj - a.proj)[0],
+    anchor: () => state.players.filter(p => p.positions.includes(pos) && p.proj > 0 && !NEVER_USE.has(p.status) && !isExcluded(p)).sort((a, b) => b.proj - a.proj)[0],
     explain() {
       const a = this.anchor(); if (!a) return "";
       const role = state.mode === "showdown" ? `at Captain (${(a.proj * 1.5).toFixed(2)} pts, ${fmt$(a.cptSalary)})` : `(${a.proj.toFixed(2)} pts, ${fmt$(a.salary)})`;
@@ -853,9 +868,9 @@ $("board").addEventListener("click", e => {
 });
 $("chips").addEventListener("click", e => {
   const b = e.target.closest("[data-unlock]"); if (!b) return;
-  const p = playerById(b.dataset.unlock); if (p) { state.locks.delete(p.pid); saveLocks(); renderAll(); }
+  const p = playerById(b.dataset.unlock); if (p) { state.locks.delete(p.pid); state.excl.delete(p.pid); saveLocks(); renderAll(); }
 });
-$("clearlocks").addEventListener("click", () => { state.locks.clear(); saveLocks(); renderAll(); });
+$("clearlocks").addEventListener("click", () => { state.locks.clear(); state.excl.clear(); saveLocks(); renderAll(); });
 $("builds").addEventListener("click", e => { const b = e.target.closest(".build"); if (b) runBuild([b.dataset.build]); });
 $("buildall").addEventListener("click", () => runBuild(["balanced", "projected", ...SP().anchors]));
 $("refresh").addEventListener("click", () => { state.projCache = {}; loadAll(); });
