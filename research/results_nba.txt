@@ -1,0 +1,40 @@
+29 NBA slates
+  [   90s]  NBA 2026-10-21 (11 games)  field median  254.0  99th  304.6  best  320.0 | Projected:280.0  Balanced:264.5  Projected+:280.0  Balanced+:264.5
+  [   48s]  NBA 2026-10-22 (2 games)   field median  229.8  99th  283.8  best  293.8 | Projected:219.5  Balanced:206.2  Projected+:219.5  Balanced+:206.2
+  [   65s]  NBA 2026-10-23 (6 games)   field median  231.8  99th  297.3  best  299.0 | Projected:204.5  Balanced:204.5  Projected+:204.5  Balanced+:204.5
+  [   66s]  NBA 2026-10-24 (5 games)   field median  260.8  99th  305.3  best  314.5 | Projected:232.2  Balanced:232.2  Projected+:232.2  Balanced+:232.2
+  [   60s]  NBA 2026-10-25 (4 games)   field median  254.0  99th  296.0  best  308.8 | Projected:271.0  Balanced:265.5  Projected+:274.8  Balanced+:274.8
+  [   94s]  NBA 2026-10-26 (7 games)   field median  281.2  99th  342.5  best  354.5 | Projected:326.5  Balanced:307.0  Projected+:237.5  Balanced+:266.0
+  [   86s]  NBA 2026-10-27 (4 games)   field median  246.8  99th  302.0  best  315.5 | Projected:261.0  Balanced:248.5  Projected+:232.2  Balanced+:232.2
+  [  134s]  NBA 2026-10-28 (9 games)   field median  244.1  99th  320.6  best  329.8 | Projected:257.5  Balanced:241.2  Projected+:279.2  Balanced+:279.2
+  [   83s]  NBA 2026-10-30 (8 games)   field median  243.1  99th  293.8  best  302.2 | Projected:251.5  Balanced:251.5  Projected+:251.8  Balanced+:251.8
+  [   78s]  NBA 2026-10-29 (3 games)   field median  267.9  99th  336.8  best  360.0 | Projected:251.8  Balanced:251.8  Projected+:217.0  Balanced+:243.5
+  [   62s]  NBA 2026-10-31 (5 games)   field median  255.8  99th  314.6  best  325.0 | Projected:267.5  Balanced:273.8  Projected+:277.2  Balanced+:280.8
+  [   92s]  NBA 2026-11-01 (4 games)   field median  260.4  99th  309.8  best  317.8 | Projected:253.2  Balanced:253.2  Projected+:269.0  Balanced+:269.0
+  [  109s]  NBA 2026-11-02 (11 games)  field median  292.4  99th  348.3  best  362.5 | Projected:305.5  Balanced:298.8  Projected+:281.2  Balanced+:286.5
+  [  125s]  NBA 2026-11-04 (11 games)  field median  241.9  99th  303.0  best  304.8 | Projected:255.8  Balanced:255.8  Projected+:255.8  Balanced+:255.8
+  [   68s]  NBA 2026-11-05 (2 games)   field median  225.8  99th  271.0  best  274.0 | Projected:218.5  Balanced:218.5  Projected+:231.0  Balanced+:231.0
+  [   61s]  NBA 2026-11-06 (7 games)   field median  258.6  99th  313.1  best  328.0 | Projected:282.8  Balanced:275.2  Projected+:264.5  Balanced+:264.5
+  [  111s]  NBA 2026-11-07 (5 games)   field median  251.9  99th  302.5  best  324.5 | Projected:304.0  Balanced:259.0  Projected+:219.8  Balanced+:247.2
+  [   88s]  NBA 2026-11-08 (5 games)   field median  227.6  99th  283.3  best  296.2 | Projected:210.2  Balanced:217.2  Projected+:244.5  Balanced+:176.2
+  [  130s]  NBA 2026-11-09 (7 games)   field median  248.1  99th  315.5  best  319.5 | Projected:271.0  Balanced:252.2  Projected+:233.8  Balanced+:234.8
+  [  130s]  NBA 2026-11-10 (5 games)   field median  226.2  99th  265.3  best  275.5 | Projected:267.2  Balanced:232.5  Projected+:256.8  Balanced+:237.5
+  [  140s]  NBA 2026-11-11 (7 games)   field median  237.6  99th  282.8  best  295.0 | Projected:243.8  Balanced:243.8  Projected+:294.0  Balanced+:294.0
+  [   92s]  NBA 2026-11-12 (4 games)   field median  265.2  99th  336.8  best  347.2 | Projected:267.8  Balanced:265.2  Projected+:265.8  Balanced+:222.0
+  [   74s]  NBA 2026-11-13 (6 games)   field median  278.1  99th  332.5  best  336.8 | Projected:292.5  Balanced:292.0  Projected+:287.8  Balanced+:295.8
+  [   69s]  NBA 2026-11-14 (5 games)   field median  302.5  99th  379.3  best  386.5 | Projected:330.0  Balanced:330.0  Projected+:343.0  Balanced+:343.0
+  [   80s]  NBA 2026-11-15 (5 games)   field median  242.4  99th  297.3  best  303.5 | Projected:233.0  Balanced:239.2  Projected+:249.5  Balanced+:291.8
+  [   79s]  NBA 2026-11-16 (7 games)   field median  259.2  99th  323.5  best  332.5 | Projected:291.5  Balanced:283.8  Projected+:288.0  Balanced+:288.0
+  [  124s]  NBA 2026-11-17 (5 games)   field median  260.6  99th  329.3  best  335.5 | Projected:284.5  Balanced:284.5  Projected+:296.5  Balanced+:296.5
+  [  119s]  NBA 2026-11-18 (9 games)   field median  244.9  99th  292.8  best  302.2 | Projected:239.8  Balanced:254.8  Projected+:239.8  Balanced+:236.8
+  [  122s]  NBA 2026-11-19 (4 games)   field median    0.0  99th    0.0  best    0.0 | Projected:  0.0  Balanced:  0.0  Projected+:  0.0  Balanced+:  0.0
+
+strategy                           cash rate avg pctile  top-1%   won   (slates=29)
+Projected (Sleeper)                      66%        59%     10%    0%
+Balanced (Sleeper)                       62%        53%      3%    0%
+Projected (Blend)                        62%        54%      7%    0%
+Balanced (Blend)                         55%        53%      7%    0%
+Blend + 20-min floor                     62%        54%      7%    0%
+Blend + 24-min floor                     55%        51%      7%    0%
+GPP: top-20 projected                    93%        83%     14%    3%
+GPP: simulation-picked 20                97%        90%     28%    7%

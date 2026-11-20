@@ -22,6 +22,11 @@ projections, DraftKings slates, salaries and salary cap.
   on your device.
 - **Lineup types:** Top 5 Balanced, Top 5 Projected, and Top QB / RB / WR / TE (NFL) or Top PG / SG / SF /
   PF / C (NBA); in Showdown, that player is Captain. Balanced salary minimums are adjustable per sport.
+- **Exclude** (Out) any player so he is never used; locks and exclusions are remembered per slate.
+- **Cash or Tournament.** Cash builds the highest-projected lineups (Top 5 Projected cashed most often in
+  backtests). Tournament simulates the slate 1,500 times with measured player correlations, builds a field of
+  likely opponent lineups, and keeps the lineups that most often finish top 1% (about double the top-1% rate of
+  plain projection lineups in backtests). See `research/` for the data and results.
 - Lineups download as a DraftKings upload file. If DraftKings refuses the live request, the page asks for
   the salary CSV from any contest page (Export to CSV) instead.
 

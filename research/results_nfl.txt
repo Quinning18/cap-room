@@ -1,0 +1,19 @@
+8 NFL slates
+  NFL wk3 2026-09-27         field median  128.6  99th  176.7  best  184.4 | Projected:135.2  Balanced:127.2  Projected+:104.0  Balanced+:104.0
+  NFL wk4 2026-10-04         field median  117.9  99th  175.0  best  177.6 | Projected:117.1  Balanced: 88.7  Projected+: 83.4  Balanced+: 72.2
+  NFL wk5 2026-10-11         field median  159.6  99th  210.5  best  247.0 | Projected:186.1  Balanced:171.0  Projected+:165.5  Balanced+:191.0
+  NFL wk6 2026-10-18         field median  114.0  99th  151.4  best  155.8 | Projected: 89.7  Balanced:124.5  Projected+:118.1  Balanced+:116.2
+  NFL wk7 2026-10-25         field median  135.4  99th  183.6  best  200.8 | Projected:163.4  Balanced:167.6  Projected+:127.7  Balanced+:149.2
+  skip NFL wk1 2026-11-01 field failed
+  NFL wk9 2026-11-08         field median  121.9  99th  164.8  best  168.6 | Projected:161.5  Balanced:138.4  Projected+:134.7  Balanced+:117.1
+  NFL wk10 2026-11-15        field median  166.1  99th  233.3  best  246.7 | Projected:184.5  Balanced:166.9  Projected+:179.7  Balanced+:162.7
+
+strategy                           cash rate avg pctile  top-1%   won   (slates=8)
+Projected (Sleeper)                      71%        66%      0%    0%
+Balanced (Sleeper)                       71%        61%      0%    0%
+Projected (Blend)                        57%        46%      0%    0%
+Balanced (Blend)                         43%        46%      0%    0%
+Projected + QB stack (Sleeper)           71%        62%      0%    0%
+Balanced + QB stack (Sleeper)            57%        54%      0%    0%
+GPP: top-20 projected                   100%        88%     14%    0%
+GPP: simulation-picked 20               100%        94%     43%   29%

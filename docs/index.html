@@ -137,6 +137,7 @@ tr.excluded td:not(.lockcell) { opacity: .45; text-decoration: line-through; }
 .chip.out { border-color: var(--warn); }
 .chip.out b { color: var(--warn); }
 .build.mine { border-style: dashed; }
+.build.best { border-color: var(--turf); box-shadow: inset 0 0 0 1px var(--turf); }
 .stylebar { display: grid; gap: 6px; }
 .gppbox { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .simstats { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px; font-size: .82rem; color: var(--muted); border-top: 1px solid var(--line); }
@@ -268,6 +269,7 @@ const SPORTS = {
     footer: "NBA projections are Sleeper's per-game projected stats for each game on the slate, converted to DraftKings scoring: 1 per point, +0.5 per three, 1.25 per rebound, 1.5 per assist, 2 per steal or block, -0.5 per turnover, +1.5 for a double-double and +3 for a triple-double (scored as their chance). Players listed Out are only used if you lock them.",
   },
 };
+const NBA_BLEND = false;  // tested: better per-player accuracy, but worse lineups in backtests
 const NEVER_USE = new Set(["OUT", "IR", "D"]);   // DraftKings: Out, Injured Reserve, Doubtful
 const NFL_FLEX = ["RB", "WR", "TE"];
 
@@ -405,7 +407,8 @@ async function loadSlate() {
     let p = byPlayer.get(d.playerId);
     if (!p) {
       p = { pid: d.playerId, name: d.displayName, pos: d.position, positions: d.position.split("/"), team: d.teamAbbreviation,
-        status: d.status && d.status !== "None" ? d.status : "", game: d.competition?.name || "", start: d.competition?.startTime || "", elig: [] };
+        status: d.status && d.status !== "None" ? d.status : "", game: d.competition?.name || "", start: d.competition?.startTime || "", elig: [],
+        fppg: +(d.draftStatAttributes || []).find(a => a.id === 219)?.value || 0 };
       byPlayer.set(d.playerId, p);
     }
     if (state.mode === "showdown") {
@@ -454,16 +457,25 @@ async function nbaProjections(players) {
 async function attachProjections(players, games, source) {
   const { rows, label } = isNBA() ? await nbaProjections(players) : await nflProjections(games);
   const idx = indexProjections(rows);
+  let newest = 0;
   for (const p of players) {
     const pr = findProjection(idx, p);
-    const pts = pr ? (isNBA() ? dkPointsNBA(pr.stats) : dkPointsNFL(pr.stats, p.pos)) : 0;
+    if (pr) newest = Math.max(newest, +pr.updated_at || +pr.last_modified || 0);
+    let pts = pr ? (isNBA() ? dkPointsNBA(pr.stats) : dkPointsNFL(pr.stats, p.pos)) : 0;
+    p.sleeper = pts;
+    // NBA blend of 60% Sleeper + 40% season average (DraftKings FPPG): more accurate per player,
+    // but its lineups cashed less often than Sleeper-only lineups in backtests, so it is off.
+    if (isNBA() && NBA_BLEND && pts > 0 && p.fppg > 0) pts = 0.6 * pts + 0.4 * p.fppg;
     p.proj = Math.round(pts * 100) / 100;
   }
   state.players = players;
   loadLocks();
-  const loaded = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const clock = t => new Date(t).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const changed = newest ? new Date(newest).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" }) : "";
+  const stale = newest && Date.now() - newest > 60 * 60 * 1000;
   setStatus(`<span>${SP().name} ${M().name}</span><span>${label}</span><span>Salary cap <b class="num">${fmt$(state.cap)}</b></span>` +
-    `<span><b>${players.filter(p => p.proj > 0).length}</b> projected players</span><span>Salaries: ${esc(source)}</span><span>Updated ${loaded}</span>`);
+    `<span><b>${players.filter(p => p.proj > 0).length}</b> projected players</span><span>Salaries: ${esc(source)}</span><span>Loaded ${clock(Date.now())}</span>` +
+    (changed ? `<span>Sleeper last updated projections <b>${changed}</b>${stale ? " - press Refresh close to lock to catch late injury news" : ""}</span>` : ""));
 }
 
 /* DraftKings salary CSV (contest page > Export to CSV) - used when DraftKings blocks the live request. */
@@ -556,9 +568,9 @@ function applyMode() {
   $("modehint").textContent = M().hint;
   const role = pos => sd ? `The #1 ${pos} as Captain` : `Built around the #1 ${pos}`;
   $("builds").innerHTML =
-    `<button type="button" class="build mine" data-build="mine"><strong>Best Around My Locks</strong><span>Top 5 lineups built around the players you lock</span></button>
-     <button type="button" class="build" data-build="balanced"><strong>Top 5 Balanced</strong><span>No cheap or injury-tagged players</span></button>
-     <button type="button" class="build" data-build="projected"><strong>Top 5 Projected</strong><span>The 5 highest-scoring lineups possible</span></button>` +
+    `<button type="button" class="build best" data-build="projected"><strong>Top 5 Projected</strong><span>Best for cash: cashed most often in backtests</span></button>
+     <button type="button" class="build mine" data-build="mine"><strong>Best Around My Locks</strong><span>Top 5 lineups built around the players you lock</span></button>
+     <button type="button" class="build" data-build="balanced"><strong>Top 5 Balanced</strong><span>No cheap or Questionable players (cashed less often in tests)</span></button>` +
     sp.anchors.map(pos => `<button type="button" class="build" data-build="${pos}"><strong>Top ${pos} Lineup</strong><span>${role(pos)}</span></button>`).join("");
   $("buildall").textContent = `Build all ${2 + sp.anchors.length}`;
   const gpp = state.style === "gpp";
@@ -568,7 +580,7 @@ function applyMode() {
   $("gppstackwrap").hidden = isNBA() || sd;
   $("stylehint").textContent = gpp
     ? "For tournaments (GPPs). Simulates the slate 1,500 times with real player correlations, builds a field of likely opponent lineups, and keeps the lineups that most often finish in the top 1%."
-    : "For cash games (double-ups, 50/50s, head-to-heads). Maximizes projected points, the approach that cashed most often in backtests.";
+    : "For cash games (double-ups, 50/50s, head-to-heads). Top 5 Projected cashed most often in backtests on this season's slates.";
   document.querySelectorAll("[data-sport-only]").forEach(el => el.hidden = el.dataset.sportOnly !== state.sport);
   $("footer").textContent = sp.footer + " Showdown captains score 1.5x and cost 1.5x. Salaries, slates and the salary cap come from DraftKings each time the page loads.";
 }
