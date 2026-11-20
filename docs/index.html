@@ -142,6 +142,10 @@ tr.excluded td:not(.lockcell) { opacity: .45; text-decoration: line-through; }
 .gppbox { display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
 .simstats { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px; font-size: .82rem; color: var(--muted); border-top: 1px solid var(--line); }
 .simstats b { color: var(--ink); }
+.suggest { display: grid; gap: 6px; }
+.suggest h3 { font-size: 1rem; letter-spacing: .05em; color: var(--muted); }
+.sugg { min-height: 34px; padding: 4px 10px; font-weight: 600; text-align: left; }
+.sugg span { font-weight: 400; font-size: .8rem; }
 td.slot.cpt { color: var(--gold); }
 .pos-inline { display: none; }
 @media (max-width: 560px) {
@@ -202,6 +206,7 @@ td.slot.cpt { color: var(--gold); }
         <div class="mode" id="style" role="group" aria-label="Contest style">
           <button type="button" data-style="cash" aria-pressed="true">Cash</button>
           <button type="button" data-style="gpp" aria-pressed="false">Tournament</button>
+          <button type="button" data-style="core" aria-pressed="false">Core Builder</button>
         </div>
         <p class="explain" id="stylehint"></p>
       </div>
@@ -216,6 +221,9 @@ td.slot.cpt { color: var(--gold); }
             <option value="none">No stacking rule</option></select></label>
         </div>
         <div class="controls"><button type="button" class="primary" id="rungpp">Simulate &amp; build</button></div>
+      </div>
+      <div class="gppbox" id="corebox" hidden>
+        <div class="controls"><button type="button" class="primary" id="runcore">Find winning cores</button></div>
       </div>
       <details class="settings" id="balsettings">
         <summary>Balanced lineup rules</summary>
@@ -428,10 +436,12 @@ async function nflProjections(games) {
   const st = await getJSON(URLS.state("nfl"));
   state.season = st.season;
   // Sleeper's "current week" can lag or lead the DraftKings slate, so pick the week whose matchups fit the slate.
+  // Try the current week, then next and previous (Sleeper rolls over early in the week).
   let week = st.week || 1, rows = await cachedJSON(URLS.projNFL(state.season, week));
-  if (matchShare(rows, games) < 0.6) {
-    const next = await cachedJSON(URLS.projNFL(state.season, week + 1));
-    if (matchShare(next, games) > matchShare(rows, games)) { week += 1; rows = next; }
+  for (const w of [week + 1, week - 1]) {
+    if (matchShare(rows, games) >= 0.6 || w < 1) continue;
+    const alt = await cachedJSON(URLS.projNFL(state.season, w));
+    if (matchShare(alt, games) > matchShare(rows, games)) { week = w; rows = alt; }
   }
   state.week = week;
   return { rows, label: `Week <b>${week}</b> projections` };
@@ -454,14 +464,59 @@ async function nbaProjections(players) {
   return { rows, label: `Projections for <b>${nice.join(", ")}</b>` };
 }
 
+
+/* Market inputs (game lines and player props) prepared by the scheduled job in backend/lines.py.
+   Propped stats move halfway toward the market's median; other stats take half of the team-total
+   adjustment. Missing or stale data is ignored. */
+const LINES_URL = "https://raw.githubusercontent.com/Quinning18/cap-room/data/lines.json";
+async function marketData() {
+  if (state.lines !== undefined) return state.lines;
+  try {
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 4000);
+    const r = await fetch(`${LINES_URL}?t=${Math.floor(Date.now() / 300000)}`, { signal: ctrl.signal });
+    clearTimeout(t);
+    const d = r.ok ? await r.json() : null;
+    state.lines = d && Date.now() - Date.parse(d.updated) < 36 * 3600 * 1000 ? d : null;
+  } catch { state.lines = null; }
+  return state.lines;
+}
+const VOL_STATS = { nba: ["pts", "reb", "ast", "stl", "blk", "tpm", "to"],
+  nfl: ["pass_yd", "pass_td", "rush_yd", "rush_td", "rec", "rec_yd", "rec_td", "pass_2pt", "rush_2pt", "rec_2pt"] };
+function marketAdjusted(pr, p, lines) {
+  const sport = isNBA() ? "nba" : "nfl", L = lines && lines[sport];
+  if (!L) return pr.stats;
+  const s = { ...pr.stats }, clamp = x => Math.min(1.5, Math.max(0.67, x));
+  const mk = (L.players || {})[pr.player_id + (isNBA() ? "|" + pr.date : "")] || {};
+  if (p.pos === "DST") {
+    const of = (L.teams || {})[pr.opponent];
+    if (of && s.pts_allow != null) s.pts_allow = +s.pts_allow * clamp(1 + 0.5 * (of - 1));
+    return s;
+  }
+  const tf = (L.teams || {})[isNBA() ? `${pr.team}|${pr.date}` : pr.team];
+  if (tf) for (const k of VOL_STATS[sport]) if (s[k] != null && mk[k] == null) s[k] = +s[k] * clamp(1 + 0.5 * (tf - 1));
+  for (const [k, v] of Object.entries(mk)) {
+    if (k[0] === "_") continue;
+    if (k === "td_any") {
+      const cur = (+s.rush_td || 0) + (+s.rec_td || 0);
+      if (cur > 0.02) { const f = clamp((0.5 * cur + 0.5 * v) / cur); if (s.rush_td) s.rush_td *= f; if (s.rec_td) s.rec_td *= f; }
+      continue;
+    }
+    const cur = +s[k] || 0;
+    s[k] = cur > 0 ? cur * clamp((0.5 * cur + 0.5 * v) / cur) : 0.5 * v;
+  }
+  return s;
+}
+
 async function attachProjections(players, games, source) {
-  const { rows, label } = isNBA() ? await nbaProjections(players) : await nflProjections(games);
+  const [{ rows, label }, lines] = await Promise.all([isNBA() ? nbaProjections(players) : nflProjections(games), marketData()]);
   const idx = indexProjections(rows);
   let newest = 0;
   for (const p of players) {
     const pr = findProjection(idx, p);
     if (pr) newest = Math.max(newest, +pr.updated_at || +pr.last_modified || 0);
-    let pts = pr ? (isNBA() ? dkPointsNBA(pr.stats) : dkPointsNFL(pr.stats, p.pos)) : 0;
+    const stats = pr ? marketAdjusted(pr, p, lines) : null;
+    let pts = pr ? (isNBA() ? dkPointsNBA(stats) : dkPointsNFL(stats, p.pos)) : 0;
+    p.sid = pr ? pr.player_id : null;
     p.sleeper = pts;
     // NBA blend of 60% Sleeper + 40% season average (DraftKings FPPG): more accurate per player,
     // but its lineups cashed less often than Sleeper-only lineups in backtests, so it is off.
@@ -573,12 +628,15 @@ function applyMode() {
      <button type="button" class="build" data-build="balanced"><strong>Top 5 Balanced</strong><span>No cheap or Questionable players (cashed less often in tests)</span></button>` +
     sp.anchors.map(pos => `<button type="button" class="build" data-build="${pos}"><strong>Top ${pos} Lineup</strong><span>${role(pos)}</span></button>`).join("");
   $("buildall").textContent = `Build all ${2 + sp.anchors.length}`;
-  const gpp = state.style === "gpp";
+  const gpp = state.style === "gpp", corem = state.style === "core";
   document.querySelectorAll("#style button").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === state.style));
-  $("builds").hidden = $("cashctl").hidden = $("balsettings").hidden = gpp;
+  $("builds").hidden = $("cashctl").hidden = $("balsettings").hidden = gpp || corem;
   $("gppbox").hidden = !gpp;
+  $("corebox").hidden = !corem;
   $("gppstackwrap").hidden = isNBA() || sd;
-  $("stylehint").textContent = gpp
+  $("stylehint").textContent = corem
+    ? `Simulates the slate and finds the ${sd ? 3 : 4}-player cores that show up most in winning lineups. Pick a core, then fill each spot from suggestions or let the optimizer finish it.`
+    : gpp
     ? "For tournaments (GPPs). Simulates the slate 1,500 times with real player correlations, builds a field of likely opponent lineups, and keeps the lineups that most often finish in the top 1%."
     : "For cash games (double-ups, 50/50s, head-to-heads). Top 5 Projected cashed most often in backtests on this season's slates.";
   document.querySelectorAll("[data-sport-only]").forEach(el => el.hidden = el.dataset.sportOnly !== state.sport);
@@ -775,7 +833,8 @@ async function solveOne(pool, { locks = new Map(), previous = [], minDiff = 1, v
   }
   let k = 0;
   for (const [pid, kind] of locks) {
-    const terms = E.map((e, i) => String(e.p.pid) === String(pid) && (kind !== "cpt" || e.slot === "CPT") ? `+ 1 ${v(i)}` : null).filter(Boolean);
+    const okSlot = e => kind === "cpt" ? e.slot === "CPT" : kind === "flex" ? e.slot !== "CPT" : true;
+    const terms = E.map((e, i) => String(e.p.pid) === String(pid) && okSlot(e) ? `+ 1 ${v(i)}` : null).filter(Boolean);
     if (!terms.length) return null;   // locked player is not in this pool
     lines.push(` lock${k++}: ${lpSum(terms)} = 1`);
   }
@@ -941,28 +1000,24 @@ function simulate(players, n) {
 
 const lineupKey = lu => lu.picks.map(e => e.p.pid + "|" + (e.slot === "CPT" ? "C" : "")).sort().join(",");
 
-/* Tournament build:
-   1. A simulated field: lineups other players would build (optimizer on noisy projections, half stacked in NFL).
-   2. Candidates: lineups optimized for individual simulated outcomes, with stacking rules (NFL Classic).
-   3. Score everything on 1,500 fresh simulations; keep the candidates that most often finish in the
-      top 1% of the field or beat the whole field, without repeating the same core. */
-async function runTournament(count, stackRule, progress) {
+/* Shared simulation stage for Tournament and Core Builder:
+   a field of likely opponent lineups, candidate lineups built from simulated outcomes, and fresh simulations. */
+async function simulateSlateLineups({ fieldN = 80, candN = 70, simN = 1500, stackRule = "qb2bb", progress }) {
   const classicNFL = !isNBA() && state.mode === "classic";
   const fieldPool = state.players.filter(p => p.proj > 0 && !NEVER_USE.has(p.status));
   const myPool = available();
   const all = [...new Set([...fieldPool, ...myPool])];
   const idx = new Map(all.map((p, i) => [p.pid, i]));
-  const FIELD = 80, CANDS = 70, SIMS = 1500, m = all.length;
-  let done = 0; const total = FIELD + CANDS;
+  const m = all.length;
+  let done = 0; const total = fieldN + candN;
   const tick = () => progress(`Building lineups: ${++done} of ${total}`);
-
-  const fieldJobs = Array.from({ length: FIELD }, (_, k) => {
+  const fieldJobs = Array.from({ length: fieldN }, (_, k) => {
     const values = new Map(fieldPool.map(p => [p.pid, p.proj * Math.exp(0.15 * gauss())]));
     const opts = classicNFL && k % 2 ? { values, stack: 1, noDefVsOff: true } : { values };
     return solveOne(fieldPool, opts).then(lu => (tick(), lu)).catch(() => (tick(), null));
   });
-  const draws = simulate(all, CANDS);
-  const candJobs = Array.from({ length: CANDS }, (_, k) => {
+  const draws = simulate(all, candN);
+  const candJobs = Array.from({ length: candN }, (_, k) => {
     const values = new Map(all.map((p, i) => [p.pid, 0.5 * p.proj + 0.5 * draws[k * m + i]]));
     const opts = { values, locks: state.locks };
     if (classicNFL) Object.assign(opts, stackRule === "qb2bb" && k % 3 ? { stack: 2, bringback: true, noDefVsOff: true }
@@ -972,34 +1027,223 @@ async function runTournament(count, stackRule, progress) {
   const field = (await Promise.all(fieldJobs)).filter(Boolean);
   const seen = new Set();
   const cands = (await Promise.all(candJobs)).filter(lu => lu && !seen.has(lineupKey(lu)) && seen.add(lineupKey(lu)));
-  if (!cands.length) return { lineups: [], own: new Map() };
-
-  progress(`Simulating ${SIMS.toLocaleString()} versions of the slate...`);
+  progress(`Simulating ${simN.toLocaleString()} versions of the slate...`);
   await new Promise(r => setTimeout(r, 30));
-  const sims = simulate(all, SIMS);
+  const sims = simulate(all, simN);
   const scoreIn = (lu, s) => lu.picks.reduce((a, e) => a + sims[s * m + idx.get(e.p.pid)] * (e.slot === "CPT" ? 1.5 : 1), 0);
+  const own = new Map();
+  for (const lu of field) for (const e of lu.picks) own.set(e.p.pid, (own.get(e.p.pid) || 0) + 1 / Math.max(1, field.length));
+  return { field, cands, sims, simN, scoreIn, own };
+}
+
+/* Tournament build: keep the candidates that most often finish in the top 1% of the simulated field
+   or beat the whole field, without repeating the same core. */
+async function runTournament(count, stackRule, progress) {
+  const { field, cands, simN, scoreIn, own } = await simulateSlateLineups({ stackRule, progress });
+  if (!cands.length) return { lineups: [], own };
   const top1 = new Float64Array(cands.length), win = new Float64Array(cands.length), mean = new Float64Array(cands.length);
   const fs = new Float64Array(field.length);
-  for (let s = 0; s < SIMS; s++) {
+  for (let s = 0; s < simN; s++) {
     for (let f = 0; f < field.length; f++) fs[f] = scoreIn(field[f], s);
     const sorted = Float64Array.from(fs).sort();
     const line = sorted[Math.min(sorted.length - 1, Math.floor(0.99 * (sorted.length - 1)))], best = sorted[sorted.length - 1];
-    cands.forEach((lu, c) => { const v = scoreIn(lu, s); mean[c] += v / SIMS; if (v >= line) top1[c]++; if (v > best) win[c]++; });
+    cands.forEach((lu, c) => { const v = scoreIn(lu, s); mean[c] += v / simN; if (v >= line) top1[c]++; if (v > best) win[c]++; });
   }
-  const own = new Map();
-  for (const lu of field) for (const e of lu.picks) own.set(e.p.pid, (own.get(e.p.pid) || 0) + 1 / field.length);
   const order = cands.map((lu, c) => c).sort((a, b) => (top1[b] + 2 * win[b]) - (top1[a] + 2 * win[a]) || mean[b] - mean[a]);
   const maxShared = state.mode === "showdown" ? 4 : M().size - 3;
   const chosen = [];
   for (const c of order) {
     const lu = cands[c], ids = new Set(lu.picks.map(e => e.p.pid));
     if (chosen.every(x => x.picks.filter(e => ids.has(e.p.pid)).length <= maxShared)) {
-      chosen.push(Object.assign(lu, { top1: top1[c] / SIMS, win: win[c] / SIMS, simMean: mean[c],
+      chosen.push(Object.assign(lu, { top1: top1[c] / simN, win: win[c] / simN, simMean: mean[c],
         own: lu.picks.reduce((a, e) => a + (own.get(e.p.pid) || 0), 0) }));
     }
     if (chosen.length === count) break;
   }
   return { lineups: chosen, own };
+}
+
+/* ---------- Core Builder ---------- */
+// A "core" is the group of players (4 in Classic, 3 in Showdown) that shows up most often in winning lineups:
+// in each simulated slate, the 3 best lineups among the field and the candidates count as winners.
+const coreKeyOf = e => state.mode === "showdown" ? e.p.pid + (e.slot === "CPT" ? "|C" : "|F") : String(e.p.pid);
+function combos(arr, k, start = 0, cur = [], out = []) {
+  if (cur.length === k) { out.push(cur.slice()); return out; }
+  for (let i = start; i <= arr.length - (k - cur.length); i++) { cur.push(arr[i]); combos(arr, k, i + 1, cur, out); cur.pop(); }
+  return out;
+}
+
+async function findCores(progress) {
+  const sim = await simulateSlateLineups({ fieldN: 80, candN: 90, simN: 1500, stackRule: "qb2bb", progress });
+  const pool = [...sim.cands, ...sim.field];
+  const WINNERS = 3, size = state.mode === "showdown" ? 3 : 4;
+  const keysOf = pool.map(lu => lu.picks.map(coreKeyOf).sort());
+  const coreCount = new Map(), winners = [];
+  const scores = new Float64Array(pool.length);
+  for (let s = 0; s < sim.simN; s++) {
+    for (let i = 0; i < pool.length; i++) scores[i] = sim.scoreIn(pool[i], s);
+    const top = [...scores.keys()].sort((a, b) => scores[b] - scores[a]).slice(0, WINNERS);
+    winners.push(top);
+    const seenCores = new Set();
+    for (const i of top) for (const c of combos(keysOf[i], size)) seenCores.add(c.join(","));
+    for (const c of seenCores) coreCount.set(c, (coreCount.get(c) || 0) + 1);
+  }
+  const ranked = [...coreCount].sort((a, b) => b[1] - a[1]);
+  const cores = [];
+  for (const [key, n] of ranked) {
+    const keys = key.split(",");
+    if (cores.some(c => c.keys.filter(k => keys.includes(k)).length >= size - 1)) continue;   // skip near-duplicates of a shown core
+    const items = keys.map(k => {
+      const [pid, flag] = k.split("|");
+      const p = playerById(pid);
+      return { p, cpt: flag === "C" };
+    }).filter(x => x.p);
+    if (items.length !== size) continue;
+    const fieldShare = sim.field.filter(lu => keys.every(k => lu.picks.some(e => coreKeyOf(e) === k))).length / Math.max(1, sim.field.length);
+    cores.push({ keys, items, rate: n / sim.simN, fieldShare,
+      salary: items.reduce((a, x) => a + (x.cpt ? x.p.cptSalary : x.p.salary), 0),
+      proj: items.reduce((a, x) => a + x.p.proj * (x.cpt ? 1.5 : 1), 0) });
+    if (cores.length === 3) break;
+  }
+  return { cores, pool, keysOf, winners, simN: sim.simN };
+}
+
+/* Builder: slots, eligibility and assignment of chosen players to slots. */
+function slotList() {
+  if (state.mode === "showdown") return ["CPT", ...Array(5).fill(M().flexName)];
+  return isNBA() ? M().slotOrder.slice() : ["QB", "RB", "RB", "WR", "WR", "WR", "TE", "FLEX", "DST"];
+}
+function fits(p, slot, cpt) {
+  if (state.mode === "showdown") return slot === "CPT" ? cpt : !cpt;
+  if (isNBA()) return p.elig.includes(slot);
+  return slot === "FLEX" ? FLEX_NFL_SLOT.includes(p.pos) : p.pos === slot;
+}
+const FLEX_NFL_SLOT = ["RB", "WR", "TE"];
+// Assign chosen players to slots (backtracking; FLEX/UTIL-type slots tried last). Returns slot->choice or null.
+function assignSlots(choices) {
+  const slots = slotList(), order = slots.map((s, i) => i).sort((a, b) => flexiness(slots[a]) - flexiness(slots[b]));
+  const res = new Array(slots.length).fill(null);
+  const sorted = choices.slice().sort((a, b) => eligCount(a) - eligCount(b));
+  function go(k) {
+    if (k === sorted.length) return true;
+    for (const i of order) if (!res[i] && fits(sorted[k].p, slots[i], sorted[k].cpt)) { res[i] = sorted[k]; if (go(k + 1)) return true; res[i] = null; }
+    return false;
+  }
+  return go(0) ? res : null;
+  function eligCount(c) { return slots.filter(s => fits(c.p, s, c.cpt)).length; }
+}
+function flexiness(slot) { return ({ FLEX: 3, UTIL: 4, G: 2, F: 2 })[slot] || 1; }
+
+function salaryOf(c) { return c.cpt ? c.p.cptSalary : c.p.salary; }
+// Cheapest way to fill the open slots (ignores which exact players), to keep suggestions completable under the cap.
+function cheapestFill(openSlots, used) {
+  const pool = available().filter(p => !used.has(String(p.pid)));
+  let total = 0;
+  for (const slot of openSlots) {
+    const c = pool.filter(p => fits(p, slot, slot === "CPT")).map(p => slot === "CPT" ? p.cptSalary : p.salary).sort((a, b) => a - b)[0];
+    if (c == null) return Infinity;
+    total += c;
+  }
+  return total;
+}
+
+function coreSuggestions(cb) {
+  const slots = slotList(), assign = assignSlots(cb.choices) || [];
+  const used = new Set(cb.choices.map(c => String(c.p.pid)));
+  const spent = cb.choices.reduce((a, c) => a + salaryOf(c), 0);
+  // Winning lineups that contain every chosen player; fall back to the core alone if too few.
+  const chosenKeys = cb.choices.map(c => state.mode === "showdown" ? c.p.pid + (c.cpt ? "|C" : "|F") : String(c.p.pid));
+  const containing = keys => { const w = []; cb.data.winners.forEach(top => top.forEach(i => { if (keys.every(k => cb.data.keysOf[i].includes(k))) w.push(i); })); return w; };
+  let wins = containing(chosenKeys);
+  if (wins.length < 30) wins = containing(cb.core.keys);
+  const freq = new Map();
+  for (const i of wins) for (const k of cb.data.keysOf[i]) freq.set(k, (freq.get(k) || 0) + 1 / wins.length);
+  const out = [];
+  slots.forEach((slot, si) => {
+    if (assign[si]) return;
+    const open = slots.filter((s, j) => !assign[j] && j !== si);
+    const cpt = slot === "CPT";
+    const list = available().filter(p => !used.has(String(p.pid)) && fits(p, slot, cpt)).map(p => {
+      const choice = { p, cpt }, sal = salaryOf(choice);
+      const k = state.mode === "showdown" ? p.pid + (cpt ? "|C" : "|F") : String(p.pid);
+      return { choice, sal, f: freq.get(k) || 0, pts: p.proj * (cpt ? 1.5 : 1) };
+    }).filter(x => spent + x.sal + cheapestFill(open, new Set([...used, String(x.choice.p.pid)])) <= state.cap
+                 && assignSlots([...cb.choices, x.choice]))
+      .sort((a, b) => b.f - a.f || b.pts - a.pts).slice(0, 5);
+    out.push({ slot, si, list });
+  });
+  return { assign, out, spent, left: state.cap - spent };
+}
+
+function renderCoreBuilder(cb) {
+  const { assign, out, spent, left } = coreSuggestions(cb);
+  const slots = slotList(), full = cb.choices.length === slots.length;
+  const rows = slots.map((slot, i) => {
+    const c = assign[i];
+    if (!c) return `<tr><td class="slot">${slot}</td><td colspan="3"><span class="muted">Open - pick from the suggestions below</span></td><td></td></tr>`;
+    const inCore = cb.core.items.some(x => String(x.p.pid) === String(c.p.pid));
+    return `<tr class="${inCore ? "anchor" : ""}"><td class="slot${slot === "CPT" ? " cpt" : ""}">${slot}</td>
+      <td class="player">${esc(c.p.name)}${c.p.status ? `<span class="tag">${esc(c.p.status)}</span>` : ""}<small>${esc(c.p.team)} ${esc(c.p.pos)}${inCore ? " - core" : ""}</small></td>
+      <td class="r num">${fmt$(salaryOf(c))}</td><td class="r num"><b>${(c.p.proj * (c.cpt ? 1.5 : 1)).toFixed(2)}</b></td>
+      <td class="r">${inCore ? "" : `<button type="button" class="lockbtn" data-core-remove="${esc(c.p.pid)}">Remove</button>`}</td></tr>`;
+  }).join("");
+  const proj = cb.choices.reduce((a, c) => a + c.p.proj * (c.cpt ? 1.5 : 1), 0);
+  let html = `<article class="lineup"><div class="lineup-top"><h3>Your lineup</h3>
+    <div class="figs num"><span><b>${proj.toFixed(2)}</b> pts</span><span>${fmt$(spent)}</span><span class="${left ? "left-gold" : "muted"}">${fmt$(left)} left</span></div></div>
+    <div class="table-scroll" style="max-height:none;border-top:0"><table><tbody>${rows}</tbody></table></div></article>
+    <div class="controls">${full ? "" : `<button type="button" class="primary" id="coreopt">Optimize the rest</button>`}
+      <button type="button" id="corereset">Start over with this core</button><button type="button" id="coreback">Choose a different core</button></div>`;
+  if (!full) {
+    html += `<p class="explain">Suggestions are ranked by how often each player appeared in the simulated winning lineups that include your picks. Every suggestion still leaves enough salary to fill the remaining spots.</p>`;
+    html += out.map(({ slot, si, list }) => `<div class="suggest"><h3>${slot}</h3>${list.length ? `<div class="chips">` + list.map(x =>
+      `<button type="button" class="sugg" data-core-add="${esc(x.choice.p.pid)}" data-cpt="${x.choice.cpt ? 1 : 0}">${esc(x.choice.p.name)} <span class="muted num">${fmt$(x.sal)} - ${x.pts.toFixed(1)} pts${x.f ? ` - in ${Math.round(100 * x.f)}% of winners` : ""}</span></button>`).join("") + `</div>`
+      : `<p class="muted">No player fits this spot with the salary left. Remove a pick to free up salary.</p>`}</div>`).join("");
+  } else {
+    const lu = { picks: assign.map((c, i) => ({ p: c.p, slot: slots[i], id: c.cpt ? c.p.cptId : c.p.id })) };
+    const csv = uploadCSV([lu]), href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    html += `<div class="export"><a href="${href}" download="dk_${state.sport}_${state.mode}_core_lineup.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
+      <button type="button" id="copycsv">Copy upload file</button><span class="muted">On DraftKings: Lineups, then Upload Lineups.</span></div>`;
+    cb.csv = csv;
+  }
+  $("results").innerHTML = html;
+  if ($("copycsv")) $("copycsv").onclick = async e => { try { await navigator.clipboard.writeText(cb.csv); e.target.textContent = "Copied"; } catch { e.target.textContent = "Copy failed"; } };
+}
+
+function renderCores(data) {
+  if (!data.cores.length) { $("results").innerHTML = `<div class="empty">No cores found. Remove some exclusions and try again.</div>`; return; }
+  $("results").innerHTML = `<div class="result-head"><h2>Winning cores</h2></div>
+    <p class="explain">The ${data.cores[0].items.length}-player groups that showed up most often in the best lineups across ${data.simN.toLocaleString()} simulated slates.
+    "In winning lineups" is the share of simulations where a top-3 lineup contained the whole core; "Field" is how often the simulated field played it.</p>` +
+    data.cores.map((c, i) => `<article class="lineup"><div class="lineup-top"><h3>Core ${i + 1}</h3>
+      <div class="figs num"><span>In winning lineups <b>${(100 * c.rate).toFixed(1)}%</b></span><span>Field ${Math.round(100 * c.fieldShare)}%</span><span>${fmt$(c.salary)}</span></div></div>
+      <div class="table-scroll" style="max-height:none;border-top:0"><table><tbody>${c.items.map(x => `<tr><td class="slot${x.cpt ? " cpt" : ""}">${x.cpt ? "CPT" : esc(x.p.pos)}</td>
+        <td class="player">${esc(x.p.name)}<small>${esc(x.p.team)}</small></td><td class="muted">${esc(x.p.game)}</td>
+        <td class="r num">${fmt$(x.cpt ? x.p.cptSalary : x.p.salary)}</td><td class="r num"><b>${(x.p.proj * (x.cpt ? 1.5 : 1)).toFixed(2)}</b></td></tr>`).join("")}</tbody></table></div>
+      <div class="controls" style="padding:8px 12px"><button type="button" class="primary" data-pick-core="${i}">Build around this core</button></div></article>`).join("");
+}
+
+async function startCoreBuilder() {
+  const btn = $("runcore"); btn.disabled = true;
+  try {
+    const data = await findCores(msg => { $("results").innerHTML = `<div class="empty">${esc(msg)}</div>`; });
+    state.coreData = data; renderCores(data);
+  } catch (e) { $("results").innerHTML = `<div class="empty">Could not find cores: ${esc(e.message)}. Press Refresh and try again.</div>`; }
+  finally { btn.disabled = false; }
+}
+function pickCore(i) {
+  const core = state.coreData.cores[i];
+  state.coreBuild = { core, data: state.coreData, choices: core.items.map(x => ({ p: x.p, cpt: x.cpt })) };
+  renderCoreBuilder(state.coreBuild);
+}
+async function optimizeRest() {
+  const cb = state.coreBuild, btn = $("coreopt"); btn.disabled = true; btn.textContent = "Optimizing...";
+  const locks = new Map(cb.choices.map(c => [c.p.pid, c.cpt ? "cpt" : "any"]));
+  // In Showdown, keep each pick's role: a player chosen as FLEX/UTIL must not become Captain.
+  if (state.mode === "showdown") for (const c of cb.choices) if (!c.cpt) locks.set(c.p.pid, "flex");
+  const lu = await solveOne(available(), { locks });
+  if (!lu) { btn.disabled = false; btn.textContent = "Optimize the rest"; $("results").insertAdjacentHTML("beforeend", `<div class="empty">No lineup fits under the cap with these picks. Remove one and try again.</div>`); return; }
+  cb.choices = lu.picks.map(e => ({ p: e.p, cpt: e.slot === "CPT" }));
+  renderCoreBuilder(cb);
 }
 
 async function topN(pool, n) {
@@ -1090,7 +1334,8 @@ $("builds").addEventListener("click", e => { const b = e.target.closest(".build"
 $("style").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b || b.dataset.style === state.style) return;
   state.style = b.dataset.style; store.set("style", state.style); state.lastBuild = null; applyMode();
-  $("results").innerHTML = `<div class="empty">${state.style === "gpp" ? "Choose how many lineups, then Simulate & build." : "Lock any players you want, then pick a lineup type above."}</div>`;
+  $("results").innerHTML = `<div class="empty">${state.style === "gpp" ? "Choose how many lineups, then Simulate & build."
+    : state.style === "core" ? "Press Find winning cores to simulate the slate." : "Lock any players you want, then pick a lineup type above."}</div>`;
 });
 $("rungpp").addEventListener("click", async () => {
   const box = $("results"), problem = lockProblems();
@@ -1112,8 +1357,19 @@ $("rungpp").addEventListener("click", async () => {
   } catch (e) { box.innerHTML = `<div class="empty">Could not build tournament lineups: ${esc(e.message)}. Press Refresh and try again.</div>`; }
   finally { btn.disabled = false; }
 });
+$("runcore").addEventListener("click", startCoreBuilder);
+$("results").addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  const cb = state.coreBuild;
+  if (t.dataset.pickCore != null) pickCore(+t.dataset.pickCore);
+  else if (t.dataset.coreAdd && cb) { const p = playerById(t.dataset.coreAdd); if (p) { cb.choices.push({ p, cpt: t.dataset.cpt === "1" }); renderCoreBuilder(cb); } }
+  else if (t.dataset.coreRemove && cb) { cb.choices = cb.choices.filter(c => String(c.p.pid) !== t.dataset.coreRemove); renderCoreBuilder(cb); }
+  else if (t.id === "coreopt" && cb) optimizeRest();
+  else if (t.id === "corereset" && cb) { cb.choices = cb.core.items.map(x => ({ p: x.p, cpt: x.cpt })); renderCoreBuilder(cb); }
+  else if (t.id === "coreback" && state.coreData) renderCores(state.coreData);
+});
 $("buildall").addEventListener("click", () => runBuild(["balanced", "projected", ...SP().anchors]));
-$("refresh").addEventListener("click", () => { state.projCache = {}; loadAll(); });
+$("refresh").addEventListener("click", () => { state.projCache = {}; state.lines = undefined; loadAll(); });
 function switchTo(change) {
   Object.assign(state, change, { slate: null, lastBuild: null, players: [] });
   store.set("sport", state.sport); store.set("mode", state.mode);

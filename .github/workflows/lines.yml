@@ -1,0 +1,40 @@
+name: Update lines
+
+# Collects game lines (ESPN) and player props (The Odds API) for upcoming NBA and NFL games and publishes
+# them to the `data` branch as lines.json, which the web app reads. See backend/lines.py.
+on:
+  schedule:
+    - cron: "7 14-23 * * *"   # hourly, 10am-7pm Eastern (UTC times)
+    - cron: "7 0-3 * * *"     # hourly, 8pm-11pm Eastern
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lines
+  cancel-in-progress: false
+
+jobs:
+  lines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch previous lines file
+        run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/data/lines.json" -o prev.json || echo '{}' > prev.json
+      - name: Build lines file
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          PROPS_WINDOW_HOURS: "24"
+          PROPS_REFRESH_HOURS: "4"
+          PROPS_CLOSE_HOURS: "2"
+        run: python3 backend/lines.py lines.json prev.json
+      - name: Publish to the data branch
+        run: |
+          mkdir out && cp lines.json out/
+          cd out
+          git init -q -b data
+          git add lines.json
+          git -c user.name="cap-room-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -qm "Update lines"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" data
