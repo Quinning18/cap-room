@@ -147,6 +147,11 @@ tr.excluded td:not(.lockcell) { opacity: .45; text-decoration: line-through; }
 .simstats { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px; font-size: .82rem; color: var(--muted); border-top: 1px solid var(--line); }
 .simstats b { color: var(--ink); }
 .suggest { display: grid; gap: 6px; }
+.plantable input { width: 96px; min-height: 34px; padding: 4px 8px; }
+.gppbox > *, .stylebar > *, .controls > * { min-width: 0; }
+.mode { flex-wrap: wrap; max-width: 100%; }
+@media (max-width: 560px) { .plantable input { width: 68px; } .plantable td, .plantable th { padding: 4px 3px; font-size: .78rem; } }
+.plantable td, .plantable th { padding: 6px 6px; }
 .suggest h3 { font-size: 1rem; letter-spacing: .05em; color: var(--muted); }
 .sugg { min-height: 34px; padding: 4px 10px; font-weight: 600; text-align: left; }
 .sugg span { font-weight: 400; font-size: .8rem; }
@@ -236,6 +241,7 @@ td.slot.cpt { color: var(--gold); }
           <button type="button" data-style="cash" aria-pressed="true">Cash</button>
           <button type="button" data-style="gpp" aria-pressed="false">Tournament</button>
           <button type="button" data-style="core" aria-pressed="false">Core Builder</button>
+          <button type="button" data-style="plan" aria-pressed="false">Planner</button>
         </div>
         <p class="explain" id="stylehint"></p>
       </div>
@@ -244,12 +250,27 @@ td.slot.cpt { color: var(--gold); }
       <div class="gppbox" id="gppbox" hidden>
         <div class="settings-grid">
           <label for="gppcount">Lineups <select id="gppcount"><option>1</option><option selected>5</option><option>10</option><option>20</option></select></label>
+          <label for="gppsort">Sort by <select id="gppsort">
+            <option value="score" selected>Tournament score (top 1% + 2x wins)</option>
+            <option value="top1">Top 1% rate</option><option value="win">Win rate</option></select></label>
           <label for="gppstack" id="gppstackwrap">NFL stacking <select id="gppstack">
             <option value="qb2bb" selected>QB + 2 pass-catchers + bring-back (best in tests)</option>
             <option value="qb1">QB + 1 pass-catcher</option>
             <option value="none">No stacking rule</option></select></label>
         </div>
         <div class="controls"><button type="button" class="primary" id="rungpp">Simulate &amp; build</button></div>
+      </div>
+      <div class="gppbox" id="planbox" hidden>
+        <div class="mode" id="plantype" role="group" aria-label="Contest type">
+          <button type="button" data-plan="se" aria-pressed="true">Single-entry</button>
+          <button type="button" data-plan="max5" aria-pressed="false">5-entry max</button>
+        </div>
+        <p class="explain">Enter each contest's entry fee and number of entries from its DraftKings contest page. Leave the prize pool blank to estimate it.</p>
+        <div class="table-scroll" id="planrows" style="max-height:none"></div>
+        <div class="controls"><button type="button" id="addcontest">Add contest</button>
+          <label for="maxuse" id="maxusewrap">Use one lineup in at most <select id="maxuse"><option value="1">1</option><option value="2" selected>2</option>
+            <option value="3">3</option><option value="99">any number of</option></select> contests</label></div>
+        <div class="controls"><button type="button" class="primary" id="runplan">Plan my entries</button></div>
       </div>
       <div class="gppbox" id="corebox" hidden>
         <div class="controls"><button type="button" class="primary" id="runcore">Find winning cores</button></div>
@@ -319,7 +340,7 @@ const store = {
 };
 
 const state = { sport: store.get("sport", "nfl"), mode: store.get("mode", "classic"), slates: [], slate: null, cap: 50000,
-  players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, locks: new Map(), excl: new Set(), style: store.get("style", "cash") };
+  players: [], week: null, season: null, pos: "ALL", projCache: {}, lastBuild: null, locks: new Map(), excl: new Set(), style: store.get("style", "cash"), planType: store.get("planType", "se") };
 if (!SPORTS[state.sport]) state.sport = "nfl";
 const SP = () => SPORTS[state.sport];
 const M = () => SP().modes[state.mode];
@@ -695,13 +716,17 @@ function applyMode() {
      <button type="button" class="build" data-build="balanced"><strong>Top 5 Balanced</strong><span>No cheap or Questionable players (cashed less often in tests)</span></button>` +
     sp.anchors.map(pos => `<button type="button" class="build" data-build="${pos}"><strong>Top ${pos} Lineup</strong><span>${role(pos)}</span></button>`).join("");
   $("buildall").textContent = `Build all ${2 + sp.anchors.length}`;
-  const gpp = state.style === "gpp", corem = state.style === "core";
+  const gpp = state.style === "gpp", corem = state.style === "core", planm = state.style === "plan";
   document.querySelectorAll("#style button").forEach(b => b.setAttribute("aria-pressed", b.dataset.style === state.style));
-  $("builds").hidden = $("cashctl").hidden = $("balsettings").hidden = gpp || corem;
+  $("builds").hidden = $("cashctl").hidden = $("balsettings").hidden = gpp || corem || planm;
   $("gppbox").hidden = !gpp;
   $("corebox").hidden = !corem;
+  $("planbox").hidden = !planm;
+  if (planm) renderPlanRows();
   $("gppstackwrap").hidden = isNBA() || sd;
-  $("stylehint").textContent = corem
+  $("stylehint").textContent = planm
+    ? "Plans your actual contests. Each lineup is simulated in each contest's field size with an estimated payout table, and you get the lineup with the best estimated return for every entry."
+    : corem
     ? `Simulates the slate and finds the ${sd ? 3 : 4}-player cores that show up most in winning lineups. Pick a core, then fill each spot from suggestions or let the optimizer finish it.`
     : gpp
     ? "For tournaments (GPPs). Simulates the slate 1,500 times with real player correlations, builds a field of likely opponent lineups, and keeps the lineups that most often finish in the top 1%."
@@ -1313,6 +1338,160 @@ async function optimizeRest() {
   renderCoreBuilder(cb);
 }
 
+/* ---------- Contest planners (Single-entry and 5-entry max) ---------- */
+// Estimated DraftKings-style tournament payouts: about 20% of entries paid, a min-cash near 2x the fee,
+// the rest of the pool weighted toward the top. The prize pool defaults to entries x fee less ~13% rake.
+function payoutTable(fee, size, pool) {
+  pool = pool > 0 ? pool : fee * size * 0.87;
+  const paid = Math.max(1, Math.round(size * 0.2));
+  const minCash = Math.min(2 * fee, pool / paid);
+  const w = Array.from({ length: paid }, (_, i) => Math.pow(i + 1, -1.1)), ws = w.reduce((a, b) => a + b, 0);
+  const rest = Math.max(0, pool - paid * minCash);
+  return w.map(x => minCash + rest * x / ws);   // index 0 = 1st place
+}
+function poisson(l) { const L = Math.exp(-l); let k = 0, p = 1; do { k++; p *= Math.random(); } while (p > L); return k - 1; }
+function opponentsAhead(n, q) {   // how many of n opponents beat you when each does with probability q
+  if (q <= 0) return 0; if (q >= 1) return n;
+  const m = n * q;
+  if (m < 20) return Math.min(n, poisson(m));
+  return Math.max(0, Math.min(n, Math.round(m + Math.sqrt(m * (1 - q)) * gauss())));
+}
+
+/* Expected payout, chance to cash and chance of a top-1% finish for every candidate lineup in every contest. */
+async function evaluateContests(contests, progress) {
+  const sim = await simulateSlateLineups({ fieldN: 80, candN: 100, simN: 1500, stackRule: $("gppstack").value, progress });
+  const { field, cands, simN, scoreIn } = sim;
+  if (!cands.length || field.length < 20) return { cands: [], ev: [], own: sim.own };
+  progress("Scoring every lineup in each of your contests...");
+  await new Promise(r => setTimeout(r, 30));
+  const tables = contests.map(c => payoutTable(c.fee, c.size, c.pool));
+  const ev = cands.map(() => contests.map(() => ({ pay: 0, cash: 0, top: 0 })));
+  const fs = new Float64Array(field.length);
+  for (let s = 0; s < simN; s++) {
+    let mu = 0, m2 = 0;
+    for (let f = 0; f < field.length; f++) { fs[f] = scoreIn(field[f], s); mu += fs[f]; }
+    mu /= field.length;
+    for (let f = 0; f < field.length; f++) m2 += (fs[f] - mu) ** 2;
+    const sd = Math.sqrt(m2 / field.length) || 1;
+    const sorted = Float64Array.from(fs).sort();
+    cands.forEach((lu, c) => {
+      const x = scoreIn(lu, s);
+      let lo = 0, hi = sorted.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] <= x) lo = mid + 1; else hi = mid; }
+      const above = sorted.length - lo;
+      // Share of opponents who beat this score: counted from the simulated field, or from a normal
+      // fit of the field in the tail where only a few simulated lineups are higher.
+      const q = above >= 8 ? above / sorted.length : 0.5 * erfc((x - mu) / sd / Math.SQRT2);
+      contests.forEach((ct, k) => {
+        const rank = 1 + opponentsAhead(ct.size - 1, q), r = ev[c][k], t = tables[k];
+        if (rank <= t.length) { r.pay += t[rank - 1]; r.cash++; }
+        if (rank <= Math.max(1, Math.ceil(ct.size * 0.01))) r.top++;
+      });
+    });
+  }
+  for (const row of ev) for (const r of row) { r.pay /= simN; r.cash /= simN; r.top /= simN; }
+  return { cands, ev, own: sim.own };
+}
+
+const overlapOK = (lu, chosen) => {
+  const ids = new Set(lu.picks.map(e => e.p.pid)), maxShared = state.mode === "showdown" ? 4 : M().size - 3;
+  return chosen.every(x => x.picks.filter(e => ids.has(e.p.pid)).length <= maxShared);
+};
+
+// Single-entry: highest-fee contests choose first; each lineup can be reused in up to maxUse contests.
+function planSingleEntry(contests, data, maxUse) {
+  const uses = new Map(), order = contests.map((c, i) => i).sort((a, b) => contests[b].fee - contests[a].fee);
+  const plan = new Array(contests.length);
+  for (const k of order) {
+    let best = -1;
+    data.cands.forEach((lu, c) => {
+      if ((uses.get(c) || 0) >= maxUse) return;
+      if (best < 0 || data.ev[c][k].pay > data.ev[best][k].pay) best = c;
+    });
+    if (best >= 0) { uses.set(best, (uses.get(best) || 0) + 1); plan[k] = { c: best, lu: data.cands[best], ev: data.ev[best][k] }; }
+  }
+  return plan;
+}
+// 5-entry max: the five best expected returns that are not near-copies of each other.
+function planMaxEntry(data, entries) {
+  const order = data.cands.map((lu, c) => c).sort((a, b) => data.ev[b][0].pay - data.ev[a][0].pay);
+  const chosen = [];
+  for (const c of order) {
+    if (overlapOK(data.cands[c], chosen.map(x => x.lu))) chosen.push({ c, lu: data.cands[c], ev: data.ev[c][0] });
+    if (chosen.length === entries) break;
+  }
+  return chosen;
+}
+
+/* Planner inputs (remembered on this device). */
+const PLAN_DEFAULTS = {
+  se: [{ fee: 1, size: 500, pool: 0 }, { fee: 1, size: 500, pool: 0 }, { fee: 3, size: 500, pool: 0 },
+       { fee: 3, size: 500, pool: 0 }, { fee: 5, size: 500, pool: 0 }, { fee: 5, size: 500, pool: 0 }],
+  max5: [{ fee: 1, size: 1000, pool: 0 }],
+};
+function planContests() { return store.get("plan." + state.planType, PLAN_DEFAULTS[state.planType]); }
+function renderPlanRows() {
+  const rows = planContests(), se = state.planType === "se";
+  document.querySelectorAll("#plantype button").forEach(b => b.setAttribute("aria-pressed", b.dataset.plan === state.planType));
+  $("planrows").innerHTML = `<table class="plantable"><thead><tr><th>${se ? "Contest" : ""}</th><th>Entry fee</th><th>Entries</th><th>Prize pool <span class="muted">(optional)</span></th><th></th></tr></thead><tbody>` +
+    rows.map((c, i) => `<tr><td class="muted">${se ? i + 1 : "5-entry max"}</td>
+      <td><input type="number" min="0.25" step="0.25" value="${c.fee}" data-plan-field="fee" data-i="${i}" aria-label="Entry fee for contest ${i + 1}"></td>
+      <td><input type="number" min="2" step="1" value="${c.size}" data-plan-field="size" data-i="${i}" aria-label="Number of entries for contest ${i + 1}"></td>
+      <td><input type="number" min="0" step="1" value="${c.pool || ""}" placeholder="auto" data-plan-field="pool" data-i="${i}" aria-label="Prize pool for contest ${i + 1}"></td>
+      <td>${se && rows.length > 1 ? `<button type="button" class="lockbtn" data-plan-remove="${i}">Remove</button>` : ""}</td></tr>`).join("") + `</tbody></table>`;
+  $("addcontest").hidden = $("maxusewrap").hidden = !se;
+}
+function savePlanRows(rows) { store.set("plan." + state.planType, rows); }
+
+async function runPlanner() {
+  const box = $("results"), problem = lockProblems();
+  if (problem) { box.innerHTML = `<div class="empty">${esc(problem)} Remove a locked player and build again.</div>`; return; }
+  const contests = planContests().map(c => ({ fee: +c.fee || 1, size: Math.max(2, Math.round(+c.size || 100)), pool: +c.pool || 0 }));
+  const se = state.planType === "se";
+  const btn = $("runplan"); btn.disabled = true;
+  const t0 = Date.now();
+  try {
+    const data = await evaluateContests(contests, msg => { box.innerHTML = `<div class="empty">${esc(msg)}</div>`; });
+    state.ownEst = data.own;
+    if (!data.cands.length) { box.innerHTML = `<div class="empty">No lineup fits under the cap with these locks and exclusions.</div>`; return; }
+    const picks = se ? planSingleEntry(contests, data, +$("maxuse").value) : planMaxEntry(data, 5);
+    const money = n => "$" + n.toFixed(2);
+    const statLine = (ev, fee) => `<div class="simstats num"><span>Est. return <b>${money(ev.pay)}</b> per $${fee} entry</span>` +
+      `<span>ROI <b>${ev.pay >= fee ? "+" : ""}${Math.round(100 * (ev.pay / fee - 1))}%</b></span>` +
+      `<span>In the money <b>${(100 * ev.cash).toFixed(1)}%</b></span><span>Top 1% <b>${(100 * ev.top).toFixed(1)}%</b></span></div>`;
+    const cost = se ? contests.reduce((a, c) => a + c.fee, 0) : 5 * contests[0].fee;
+    const ret = se ? picks.reduce((a, p) => a + (p ? p.ev.pay : 0), 0) : picks.reduce((a, p) => a + p.ev.pay, 0);
+    let html = `<div class="result-head"><h2>${se ? "Single-entry plan" : "5-entry max plan"}</h2></div>
+      <p class="explain">Built in ${Math.round((Date.now() - t0) / 1000)} seconds from 1,500 simulated slates. Each lineup was scored in each contest's own field size
+      with an estimated payout table, and the best estimated return was picked for every entry. Simulated total: <b>${money(ret)}</b> back on <b>${money(cost)}</b>.
+      These returns assume the projections are right and opponents build like an optimizer, so they run high: use them to compare lineups and contests,
+      not as expected profit. Real results swing a lot week to week.${lockNote()}</p>`;
+    const rows = [];
+    if (se) {
+      const letter = new Map();
+      picks.forEach(p => { if (p && !letter.has(p.c)) letter.set(p.c, String.fromCharCode(65 + letter.size)); });
+      contests.forEach((ct, k) => {
+        const p = picks[k]; if (!p) return;
+        rows.push(p.lu);
+        html += lineupHTML(Object.assign(Object.create(p.lu), { statsHTML: statLine(p.ev, ct.fee) }),
+          `Contest ${k + 1}: $${ct.fee} single entry, ${ct.size.toLocaleString()} entries - Lineup ${letter.get(p.c)}`, null);
+      });
+    } else {
+      const ct = contests[0];
+      picks.forEach((p, i) => {
+        rows.push(p.lu);
+        html += lineupHTML(Object.assign(Object.create(p.lu), { statsHTML: statLine(p.ev, ct.fee) }), `Entry ${i + 1} of 5: $${ct.fee}, ${ct.size.toLocaleString()} entries`, null);
+      });
+    }
+    const csv = uploadCSV(rows), href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    html += `<div class="export"><a href="${href}" download="dk_${state.sport}_${state.mode}_${se ? "single_entry" : "5_entry_max"}_plan.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
+      <button type="button" id="copycsv">Copy upload file</button><span class="muted">One row per entry, in the order shown. On DraftKings: Lineups, then Upload Lineups.</span></div>`;
+    box.innerHTML = html;
+    $("copycsv").onclick = async e => { try { await navigator.clipboard.writeText(csv); e.target.textContent = "Copied"; } catch { e.target.textContent = "Copy failed"; } };
+  } catch (e) { box.innerHTML = `<div class="empty">Could not build the plan: ${esc(e.message)}. Press Refresh and try again.</div>`; }
+  finally { btn.disabled = false; }
+}
+
 async function topN(pool, n) {
   const lineups = [];
   for (let k = 0; k < n; k++) {
@@ -1324,7 +1503,7 @@ async function topN(pool, n) {
 }
 
 function lineupHTML(lu, label, anchorPid) {
-  const left = state.cap - lu.salary, sim = lu.top1 != null;
+  const left = state.cap - lu.salary, sim = lu.top1 != null || !!lu.statsHTML;
   const rows = lu.slots.map(([slot, e]) => {
     const p = e.p, lk = isLocked(p);
     const own = sim && state.ownEst ? ` - own ${Math.round(100 * (state.ownEst.get(p.pid) || 0))}%` : "";
@@ -1339,7 +1518,7 @@ function lineupHTML(lu, label, anchorPid) {
     <div class="lineup-top"><h3>${esc(label)}</h3>
       <div class="figs num"><span><b>${lu.proj.toFixed(2)}</b> pts</span><span>${fmt$(lu.salary)}</span><span class="${left ? "left-gold" : "muted"}">${fmt$(left)} left</span></div></div>
     <div class="table-scroll" style="max-height:none;border-top:0"><table><tbody>${rows}</tbody></table></div>
-    ${sim ? `<div class="simstats num"><span>Top 1%: <b>${(100 * lu.top1).toFixed(1)}%</b> of sims</span><span>Beat whole field: <b>${(100 * lu.win).toFixed(1)}%</b></span>` +
+    ${lu.statsHTML ? lu.statsHTML : sim ? `<div class="simstats num"><span>Score <b>${(100 * (lu.top1 + 2 * lu.win)).toFixed(1)}</b></span><span>Top 1%: <b>${(100 * lu.top1).toFixed(1)}%</b> of sims</span><span>Beat whole field: <b>${(100 * lu.win).toFixed(1)}%</b></span>` +
       `<span>Sim average: <b>${lu.simMean.toFixed(1)}</b></span><span>Est. total ownership: <b>${Math.round(100 * lu.own)}%</b></span></div>` : ""}
   </article>`;
 }
@@ -1402,7 +1581,8 @@ $("style").addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b || b.dataset.style === state.style) return;
   state.style = b.dataset.style; store.set("style", state.style); state.lastBuild = null; applyMode();
   $("results").innerHTML = `<div class="empty">${state.style === "gpp" ? "Choose how many lineups, then Simulate & build."
-    : state.style === "core" ? "Press Find winning cores to simulate the slate." : "Lock any players you want, then pick a lineup type above."}</div>`;
+    : state.style === "core" ? "Press Find winning cores to simulate the slate."
+    : state.style === "plan" ? "Enter your contests, then Plan my entries." : "Lock any players you want, then pick a lineup type above."}</div>`;
 });
 $("rungpp").addEventListener("click", async () => {
   const box = $("results"), problem = lockProblems();
@@ -1413,8 +1593,11 @@ $("rungpp").addEventListener("click", async () => {
     const { lineups, own } = await runTournament(+$("gppcount").value, $("gppstack").value, msg => { box.innerHTML = `<div class="empty">${esc(msg)}</div>`; });
     state.ownEst = own;
     if (!lineups.length) { box.innerHTML = `<div class="empty">No lineup fits under the cap with these locks and exclusions.</div>`; return; }
-    let html = `<div class="result-head"><h2>Tournament lineups</h2></div><p class="explain">Picked from simulated outcomes in ${Math.round((Date.now() - t0) / 1000)} seconds. ` +
-      `"Top 1%" is how often the lineup finished in the top 1% of a simulated field of opponent lineups; ownership is estimated from that field.${lockNote()}</p>`;
+    const key = $("gppsort").value, val = lu => key === "top1" ? lu.top1 : key === "win" ? lu.win : lu.top1 + 2 * lu.win;
+    lineups.sort((a, b) => val(b) - val(a) || b.simMean - a.simMean);
+    let html = `<div class="result-head"><h2>Tournament lineups</h2></div><p class="explain">Picked from simulated outcomes in ${Math.round((Date.now() - t0) / 1000)} seconds, best first. ` +
+      `"Top 1%" is how often the lineup finished in the top 1% of a simulated field of opponent lineups; "Score" adds double credit for beating the whole field, ` +
+      `because first place pays far more than other top finishes. Ownership is estimated from that field.${lockNote()}</p>`;
     html += lineups.map((lu, i) => lineupHTML(lu, `Lineup ${i + 1}`, null)).join("");
     const csv = uploadCSV(lineups), href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     html += `<div class="export"><a href="${href}" download="dk_${state.sport}_${state.mode}_tournament.csv"><button type="button" tabindex="-1">Download DraftKings upload file</button></a>
@@ -1425,6 +1608,20 @@ $("rungpp").addEventListener("click", async () => {
   finally { btn.disabled = false; }
 });
 $("runcore").addEventListener("click", startCoreBuilder);
+$("runplan").addEventListener("click", runPlanner);
+$("plantype").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b || b.dataset.plan === state.planType) return;
+  state.planType = b.dataset.plan; store.set("planType", state.planType); renderPlanRows();
+});
+$("planrows").addEventListener("change", e => {
+  const f = e.target.dataset.planField; if (!f) return;
+  const rows = planContests(); rows[+e.target.dataset.i][f] = +e.target.value || 0; savePlanRows(rows);
+});
+$("planrows").addEventListener("click", e => {
+  const b = e.target.closest("[data-plan-remove]"); if (!b) return;
+  const rows = planContests(); rows.splice(+b.dataset.planRemove, 1); savePlanRows(rows); renderPlanRows();
+});
+$("addcontest").addEventListener("click", () => { const rows = planContests(); rows.push({ fee: 1, size: 500, pool: 0 }); savePlanRows(rows); renderPlanRows(); });
 $("results").addEventListener("click", e => {
   const t = e.target.closest("button"); if (!t) return;
   const cb = state.coreBuild;
